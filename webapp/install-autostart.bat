@@ -32,11 +32,14 @@ echo.
 >> "%~dp0service-run.bat" echo cd /d "%~dp0"
 >> "%~dp0service-run.bat" echo "%PY%" server.py ^>^> server.log 2^>^&1
 
-rem remove any task from before this was renamed, plus the current one
-schtasks /delete /tn "Alliance War Room" /f >nul 2>&1
+rem remove any task from before this was renamed, plus the current one
+
+schtasks /delete /tn "Alliance War Room" /f >nul 2>&1
+
 schtasks /delete /tn "Kingdom War Room" /f >nul 2>&1
-schtasks /create /tn "Kingdom War Room" /tr "\"%~dp0service-run.bat\"" ^
-  /sc onstart /ru SYSTEM /rl HIGHEST /f
+rem Single quotes inside the /tr value: backslash is not an escape to
+rem cmd, so the \" form arrives at schtasks as a broken path.
+schtasks /create /tn "Kingdom War Room" /tr "'%~dp0service-run.bat'" /sc onstart /ru SYSTEM /rl HIGHEST /f
 if errorlevel 1 goto failed
 
 echo.

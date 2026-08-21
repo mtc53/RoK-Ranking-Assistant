@@ -198,6 +198,58 @@ Sources live in `webapp/`:
 **If you change `config.toml`, re-run `python webapp/build.py` and republish**,
 or the page keeps the old weights while the local tool uses the new ones.
 
+## Uploading a new scan without touching the website
+
+`ingest.py` takes the spreadsheet the Discord bot gives you and does the rest:
+works out which week it belongs to, files it under `Alliance Activity` so the
+local tool sees it too, and updates that week on the self-hosted site.
+
+```bash
+python ingest.py
+```
+
+Or double-click **`ingest.bat`**. To have it happen by itself, right-click
+**`install-ingest-task.bat`** and Run as administrator - it checks the inbox
+every 15 minutes (`install-ingest-task.bat 5` for every five).
+
+The routine is: run the bot's command, drag the file it sends you into
+`inbox\`, and you are done. The file disappearing from `inbox\` is how you
+know it went up. Anything the scheduled task says goes to `ingest.log`.
+
+**Why not fully automatic?** The bot sends the sheet by direct message. Reading
+your DMs would mean a script logging in as you, which Discord forbids and bans
+accounts for, and a bot account cannot read your DMs either. If whoever runs
+that bot can post the export to a channel instead - or hand you a download
+link - the rest of this becomes unattended, and nothing here would need to
+change except where the file comes from.
+
+### Running it every day
+
+Dropping a sheet in daily **refreshes the current week in place** rather than
+piling up a new entry each day, so a season stays ~52 weeks and the scoring
+keeps its weekly meaning.
+
+The game's week turns over at **00:00 UTC on Monday**, and that is the line
+`ingest.py` uses. A scan taken before it refreshes the week in progress; the
+first scan after it starts a new week and the old one is left frozen exactly as
+it stood. The timestamps inside the export are already UTC - the column is
+literally called "last login (utc)" - so this does not drift when the clocks
+change. Use `--week-start` if the reset ever moves.
+
+A week already on the site keeps whatever name you gave it. Superseded
+spreadsheets are moved to `ingest-archive\`, never deleted, and nothing leaves
+`inbox\` until the site has actually accepted it - so a failed upload can just
+be run again.
+
+If the site has a password, `ingest.py` needs it too: `password.txt` next to it,
+or the `WARROOM_PASSWORD` variable.
+
+```bash
+python ingest.py --dry-run
+```
+
+says which week it would land in and changes nothing.
+
 ## Commands
 
 ```bash

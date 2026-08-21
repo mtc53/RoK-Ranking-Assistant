@@ -1,0 +1,21 @@
+# Things that are this machine's business, not the repository's.
+password.txt
+server.txt
+.secret
+inbox/
+ingest-archive/
+ingest.log
+ingest-run.bat
+service-run.bat
+
+# The self-hosted server writes these next to itself when it runs.
+selfhost/state.json
+selfhost/state.json.bak
+selfhost/backups/
+selfhost/uploads/
+selfhost/server.log
+selfhost/*.pem
+
+__pycache__/
+*.pyc
+~$*.xlsx
