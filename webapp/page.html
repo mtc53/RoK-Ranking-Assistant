@@ -570,6 +570,20 @@ function weekKey(iso) {
   return new Date(day - back * 86400000).toISOString().slice(0, 10);
 }
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"];
+
+function weekLabel(iso) {
+  const key = weekKey(iso);
+  if (!key) return null;
+  const first = new Date(key + "T00:00:00Z");
+  const last = new Date(first.getTime() + 6 * 86400000);
+  const fm = first.getUTCMonth(), lm = last.getUTCMonth();
+  return fm === lm
+    ? first.getUTCDate() + "-" + last.getUTCDate() + " " + MONTHS[fm]
+    : first.getUTCDate() + " " + MONTHS[fm] + " - " + last.getUTCDate() + " " + MONTHS[lm];
+}
+
 function sortWeeks() {
   STATE.weeks.sort((a, b) =>
     String(a.scanDate || a.label).localeCompare(String(b.scanDate || b.label)));
@@ -613,7 +627,7 @@ async function addFiles(files) {
       const week = {
         id: clash.length ? clash[0].id
           : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
-        label: clash.length ? clash[0].label : label,
+        label: clash.length ? clash[0].label : (weekLabel(scan) || label),
         scanDate: scan, members: parsed.members, summaries: parsed.summaries,
         file: { name: file.name, b64: bytesToB64(buf) },
       };
@@ -631,8 +645,7 @@ async function addFiles(files) {
   if (failed.length) notice("Could not read: " + failed.join("; "), true);
   else if (added) notice(
     replaced ? "This week's numbers replaced with the newer scan."
-      : added + (added === 1 ? " week added." : " weeks added.") +
-        " Rename any week below so the labels read the way you want.", false);
+      : added + (added === 1 ? " week added." : " weeks added."), false);
   queueSave();
 }
 
