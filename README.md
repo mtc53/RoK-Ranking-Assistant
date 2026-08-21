@@ -208,13 +208,11 @@ local tool sees it too, and updates that week on the self-hosted site.
 python ingest.py
 ```
 
-Or double-click **`ingest.bat`**. To have it happen by itself, right-click
-**`install-ingest-task.bat`** and Run as administrator - it checks the inbox
-every 15 minutes (`install-ingest-task.bat 5` for every five).
+Or double-click **`ingest.bat`**.
 
 The routine is: run the bot's command, drag the file it sends you into
-`inbox\`, and you are done. The file disappearing from `inbox\` is how you
-know it went up. Anything the scheduled task says goes to `ingest.log`.
+`inbox\`, and double-click `ingest.bat`. The file disappearing from `inbox\`
+is how you know it went up.
 
 **Why not fully automatic?** The bot sends the sheet by direct message. Reading
 your DMs would mean a script logging in as you, which Discord forbids and bans

@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 """Files a new activity export and pushes it to the War Room site.
 
-Drop the spreadsheet the Discord bot sends you into `inbox\\` and run this -
-by hand, or leave the scheduled task to do it. It works out which week the
-scan belongs to, files it under "Alliance Activity" so the local rank.py
-tool sees it too, and updates that week on the website.
+Drop the spreadsheet the Discord bot sends you into inbox\\ and run this. It
+works out which week the scan belongs to, files it under "Alliance Activity"
+so the local rank.py sees it too, and updates that week on the website.
 
-    python ingest.py                        # upload to the site in server.txt
+    python ingest.py                        # the site named in server.txt
     python ingest.py --url http://1.2.3.4   # somewhere else, just this once
-    python ingest.py --dry-run              # say what would happen, change nothing
+    python ingest.py --dry-run              # say what would happen, do nothing
 
-The site is usually on a different machine to this script, so its address
-lives in server.txt next to this file - one line, e.g. http://4098.duckdns.org.
+The site is usually on another machine, so its address lives in server.txt
+next to this file. A password, if the site has one, comes from password.txt
+or the WARROOM_PASSWORD variable.
 
-Run it again with a fresher scan of the same week and that week is REPLACED
-rather than added a second time, so dropping a sheet in every day keeps the
-current week's numbers fresh without turning a season into 365 entries.
-
-The password, if the site has one, comes from the WARROOM_PASSWORD variable
-or from a password.txt sitting next to this file.
+A fresher scan of a week already on the site replaces it, so dropping a sheet
+in daily keeps the current week's numbers fresh instead of piling up entries.
 """
 from __future__ import annotations
 
@@ -26,11 +22,12 @@ import argparse
 import base64
 import http.cookiejar
 import json
+import os
 import shutil
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -40,18 +37,15 @@ sys.path.insert(0, str(ROOT / "webapp"))
 from rok_ranker.parse import ParseError, parse_week      # noqa: E402
 from build import PACK_FIELDS                            # noqa: E402
 
-# The game's week turns over at 00:00 UTC on Monday, so that is the line a
-# scan falls one side or the other of. The timestamps inside the export are
-# already UTC - the newest last_login in a sheet matches the moment the file
-# was written - so they can be compared against it directly, with no
-# converting and nothing that shifts when the clocks change.
+# The game's week turns over at 00:00 UTC on Monday. Timestamps in the export
+# are already UTC, so they compare against it directly - nothing shifts when
+# the clocks change.
 DAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
         "friday": 4, "saturday": 5, "sunday": 6}
 
 
 def log(message: str = "") -> None:
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"{stamp}  {message}" if message else "")
+    print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {message}" if message else "")
 
 
 def die(message: str) -> None:
@@ -62,21 +56,19 @@ def die(message: str) -> None:
 # ------------------------------------------------------------------ weeks
 
 def window(moment: datetime, start_day: int):
-    """The seven days the scan belongs to, as (first, last) dates."""
+    """The seven days a scan belongs to, as (first, last) dates."""
     back = (moment.weekday() - start_day) % 7
     first = moment.date() - timedelta(days=back)
     return first, first + timedelta(days=6)
 
 
 def label_for(first, last) -> str:
-    """The same shape as the folders already in Alliance Activity."""
     if first.month == last.month:
         return f"{first.day}-{last.day} {first:%B}"
     return f"{first.day} {first:%B} - {last.day} {last:%B}"
 
 
 def scan_of(week: dict) -> datetime | None:
-    """The scan date already stored against a week on the site."""
     raw = str(week.get("scanDate") or "")
     try:
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
@@ -85,14 +77,12 @@ def scan_of(week: dict) -> datetime | None:
 
 
 def pack(week: dict, label: str, sheet: Path | None, week_id: str) -> dict:
-    """Turn a parsed week into the shape the website stores."""
     entry = {
         "id": week_id,
         "label": label,
         "scanDate": week["scan_date"].isoformat() + "Z",
         "summaries": week["summaries"],
         "cols": PACK_FIELDS,
-        # last_login is only used while parsing, so it is dropped here.
         "rows": [[None if f == "last_login" else m.get(f) for f in PACK_FIELDS]
                  for m in week["members"]],
         "file": None,
@@ -103,17 +93,34 @@ def pack(week: dict, label: str, sheet: Path | None, week_id: str) -> dict:
     return entry
 
 
+def slim(state: dict, keep_id: str) -> None:
+    """Refer to workbooks the server already holds instead of re-sending them."""
+    for week in state.get("weeks", []):
+        info = week.get("file")
+        if week.get("id") != keep_id and isinstance(info, dict) and info.get("sha"):
+            week["file"] = {"name": info.get("name"), "sha": info["sha"]}
+
+
+def merge(state: dict, entry: dict, span, start_day: int) -> dict:
+    """Put the week in, replacing whatever already covers the same days."""
+    weeks = [w for w in (state.get("weeks") or [])
+             if w.get("id") != entry["id"]
+             and window(scan_of(w) or datetime.min, start_day) != span]
+    weeks.append(entry)
+    state["weeks"] = weeks
+    state.setdefault("version", 1)
+    slim(state, entry["id"])
+    return state
+
+
 # ------------------------------------------------------------ the website
 
 class Site:
-    """The small amount of the server's API this needs."""
-
     def __init__(self, url: str, password: str | None):
         self.url = url.rstrip("/")
         self.password = password
-        self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self.jar))
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.rev = "0"
 
     def _call(self, path, method="GET", body=None, headers=None, timeout=120):
@@ -133,24 +140,22 @@ class Site:
             except ValueError:
                 return exc.code, {}, dict(exc.headers)
         except urllib.error.URLError as exc:
-            die(f"could not reach {self.url} - {exc.reason}. "
-                "Is the War Room running?")
+            die(f"could not reach {self.url} - {exc.reason}. Is the War Room running?")
 
     def sign_in(self) -> None:
         if not self.password:
             return
         code, out, _ = self._call("/api/login", "POST", {"password": self.password})
         if code == 401:
-            die("the site rejected the password. Check password.txt or "
-                "the WARROOM_PASSWORD variable.")
+            die("the site rejected the password. Check password.txt or the "
+                "WARROOM_PASSWORD variable.")
         if code != 200:
             die(f"logging in failed: {out.get('error') or code}")
 
     def read(self) -> dict:
         code, state, head = self._call("/api/state")
         if code == 401:
-            die("the site needs a password before it will show anything, and "
-                "none was given.")
+            die("the site needs a password and none was given.")
         if code != 200:
             die(f"could not read the site's data: {code}")
         self.rev = head.get("X-WarRoom-Rev", "0")
@@ -160,8 +165,7 @@ class Site:
         return state if isinstance(state, dict) else {}
 
     def write(self, state: dict) -> dict:
-        code, out, _ = self._call("/api/state", "PUT", state,
-                                  {"If-Match": self.rev})
+        code, out, _ = self._call("/api/state", "PUT", state, {"If-Match": self.rev})
         if code == 409:
             return {"conflict": True}
         if code == 401:
@@ -171,33 +175,16 @@ class Site:
         return out
 
 
-def slim(state: dict, keep_id: str) -> None:
-    """Refer to workbooks the server already holds instead of re-sending them.
-
-    Without this every save would carry a season of spreadsheets back up the
-    wire just to change one week.
-    """
-    for week in state.get("weeks", []):
-        info = week.get("file")
-        if week.get("id") != keep_id and isinstance(info, dict) and info.get("sha"):
-            week["file"] = {"name": info.get("name"), "sha": info["sha"]}
-
-
 # ----------------------------------------------------------------- filing
 
-def file_away(sheets: list[Path], activity: Path, label: str) -> Path | None:
-    """Move this run's spreadsheets into Alliance Activity\\<week>.
-
-    Anything a previous run left in that folder is moved aside rather than
-    deleted, so a bad scan can always be dug back out.
-    """
+def file_away(sheets: list[Path], activity: Path, label: str) -> None:
+    """Move this run's spreadsheets into Alliance Activity\\<week>, keeping
+    whatever a previous run left there rather than deleting it."""
     target = activity / label
     target.mkdir(parents=True, exist_ok=True)
 
     old = [p for p in target.glob("*.xlsx") if not p.name.startswith("~$")]
     if old:
-        # Beside the activity folder, not beside this script - otherwise
-        # pointing --activity somewhere else still writes back here.
         kept = (activity.parent / "ingest-archive" / label /
                 datetime.now().strftime("%Y%m%d-%H%M%S"))
         kept.mkdir(parents=True, exist_ok=True)
@@ -205,18 +192,15 @@ def file_away(sheets: list[Path], activity: Path, label: str) -> Path | None:
             shutil.move(str(path), str(kept / path.name))
         log(f"  previous scan of this week moved to {kept}")
 
-    moved = []
     for path in sheets:
         dest = target / path.name
         if dest.exists():
             dest.unlink()
         shutil.move(str(path), str(dest))
-        moved.append(dest)
     log(f"  filed under Alliance Activity\\{label}")
-    return moved[0] if len(moved) == 1 else None
 
 
-# ------------------------------------------------------------------- main
+# ----------------------------------------------------------------- config
 
 def first_line(path: Path) -> str | None:
     try:
@@ -227,7 +211,6 @@ def first_line(path: Path) -> str | None:
 
 
 def find_password(explicit: Path | None) -> str | None:
-    import os
     env = os.environ.get("WARROOM_PASSWORD")
     if env and env.strip():
         return env.strip()
@@ -239,13 +222,6 @@ def find_password(explicit: Path | None) -> str | None:
 
 
 def find_server(explicit: str | None) -> str:
-    """Where the site lives.
-
-    The site is usually on a different machine to this script, and both
-    ingest.bat and the scheduled task run with no arguments - so the address
-    goes in server.txt next to this file rather than being typed each time.
-    """
-    import os
     address = (explicit or os.environ.get("WARROOM_URL")
                or first_line(ROOT / "server.txt") or "").strip()
     if not address:
@@ -253,12 +229,12 @@ def find_server(explicit: str | None) -> str:
             "script - one line, for example:  http://203.0.113.9\n"
             "         (or pass --url). It is only http://localhost if the "
             "site runs on THIS machine.")
-    if "://" not in address:
-        address = "http://" + address
-    return address
+    return address if "://" in address else "http://" + address
 
 
-def main() -> None:
+# ------------------------------------------------------------------- main
+
+def parse_args():
     ap = argparse.ArgumentParser(description="Upload a new activity export.")
     ap.add_argument("--inbox", type=Path, default=ROOT / "inbox",
                     help="where dropped spreadsheets are picked up")
@@ -268,11 +244,15 @@ def main() -> None:
                     help="the War Room site (default: read from server.txt)")
     ap.add_argument("--password-file", type=Path, default=None)
     ap.add_argument("--week-start", default="monday", choices=sorted(DAYS),
-                    help="which day the game's week turns over (default monday, "
-                         "matching the 00:00 UTC reset)")
+                    help="the day the game's week turns over (default monday)")
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would happen and change nothing")
-    args = ap.parse_args()
+    return ap.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    start_day = DAYS[args.week_start]
 
     args.inbox.mkdir(parents=True, exist_ok=True)
     sheets = sorted(p for p in args.inbox.glob("*.xlsx")
@@ -287,30 +267,23 @@ def main() -> None:
     except ParseError as exc:
         die(f"that file could not be read as an activity export - {exc}")
 
-    first, last = window(week["scan_date"], DAYS[args.week_start])
+    span = window(week["scan_date"], start_day)
+    first, last = span
     label = label_for(first, last)
     ends = datetime.combine(last, datetime.min.time()) + timedelta(days=1)
     log(f"  scanned {week['scan_date']:%d %b %Y %H:%M} UTC - "
         f"{len(week['members'])} members")
-    log(f"  that is the week of {label} "
-        f"(ends {ends:%a %d %b %H:%M} UTC)")
+    log(f"  that is the week of {label} (ends {ends:%a %d %b %H:%M} UTC)")
 
-    password = find_password(args.password_file)
-    site = Site(find_server(args.url), password)
+    site = Site(find_server(args.url), find_password(args.password_file))
     site.sign_in()
     state = site.read()
-    weeks = state.get("weeks") or []
 
-    replacing = None
-    for existing in weeks:
-        when = scan_of(existing)
-        if when and window(when, DAYS[args.week_start]) == (first, last):
-            replacing = existing
-            break
-
+    replacing = next((w for w in (state.get("weeks") or [])
+                      if scan_of(w) and window(scan_of(w), start_day) == span), None)
     if replacing:
-        log(f"  the site already has this week (\"{replacing.get('label')}\") "
-            f"- refreshing it")
+        log(f"  the site already has this week (\"{replacing.get('label')}\")"
+            f" - refreshing it")
     else:
         log("  this is a new week for the site")
 
@@ -318,38 +291,18 @@ def main() -> None:
         log("dry run - stopping before anything is moved or uploaded")
         return
 
-    # A week already on the site keeps the name it was given - renaming
-    # somebody's week under them is not this script's business.
+    # A week already on the site keeps the name it was given.
     if replacing:
         label = replacing.get("label") or label
     week_id = replacing.get("id") if replacing else f"ingest-{first:%Y%m%d}"
-    # Read the workbook from where it still sits. Nothing is moved until the
-    # site has actually taken it, so a failure here leaves the spreadsheet in
-    # the inbox for the next run rather than filing it away unsent.
+    # Read the workbook where it still sits: nothing moves until the site has
+    # taken it, so a failure leaves the sheet in the inbox to retry.
     entry = pack(week, label, sheets[0] if len(sheets) == 1 else None, week_id)
 
-    if replacing:
-        weeks[weeks.index(replacing)] = entry
-    else:
-        weeks.append(entry)
-    state["weeks"] = weeks
-    state.setdefault("version", 1)
-    slim(state, week_id)
-
-    out = site.write(state)
+    out = site.write(merge(state, entry, span, start_day))
     if out.get("conflict"):
-        # Somebody saved on the site between reading and writing. Read again
-        # and reapply, rather than throwing away their change or ours.
         log("  somebody else saved while this was running - reapplying")
-        state = site.read()
-        weeks = state.get("weeks") or []
-        weeks = [w for w in weeks if w.get("id") != week_id
-                 and window(scan_of(w) or datetime.min,
-                            DAYS[args.week_start]) != (first, last)]
-        weeks.append(entry)
-        state["weeks"] = weeks
-        slim(state, week_id)
-        out = site.write(state)
+        out = site.write(merge(site.read(), entry, span, start_day))
         if out.get("conflict"):
             die("the site kept changing underneath this. Try again in a moment.")
 

@@ -8,8 +8,7 @@ These files all live in C:\WarRoom on the server. Nothing else is needed.
 
     index.html              the website itself
     server.py               the program that serves it
-    start.bat               start the site by hand
-    install-autostart.bat   make it start on its own at boot  (run as admin)
+    start.bat               start the site
     open-firewall.bat       open ports 80 and 443             (run as admin)
     check.bat + check.py    tells you what is wrong if it stops working
     README.txt              this file
@@ -25,18 +24,9 @@ The site creates these as it is used. DO NOT DELETE THEM:
 
 STARTING IT
 -----------
-Double-click start.bat and leave the black window open. Closing it stops
-the site.
-
-Better: right-click install-autostart.bat and Run as administrator. After
-that it starts on its own whenever the server boots, with no window to
-leave open, and you can log out safely.
-
-    stop it     schtasks /end /tn "Kingdom War Room"
-    start it    schtasks /run /tn "Kingdom War Room"
-    remove it   schtasks /delete /tn "Kingdom War Room" /f
-
-When it runs in the background, anything it prints goes to server.log.
+Double-click start.bat and leave the black window open. Closing that
+window stops the site, so leave it running and do not log out of the
+machine while you want the site up.
 
 
 WHO CAN CHANGE THE RANKINGS

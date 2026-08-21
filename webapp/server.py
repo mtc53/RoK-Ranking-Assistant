@@ -16,24 +16,15 @@ What it keeps, next to this file:
     password.txt        OPTIONAL - the password needed to change anything
     .secret             random bytes used to sign login cookies
 
-Who can change what:
-  - With no password.txt, anybody who can open the page can change the
-    rankings. That is fine on a private network and a bad idea on the
-    internet, so the server says so at startup.
-  - Put a password in password.txt and the site becomes read-only until
-    someone logs in with it. Reading stays open so officers can be sent a
-    link; add an empty private.txt as well if even reading should need the
-    password.
-
-Hosting it for real:
-  - Static-only hosting (GitHub Pages, S3) works too: upload just index.html.
-    The page then saves into each person's own browser instead, and they move
-    data around with the Download backup / Restore backup buttons.
+With no password.txt anybody who can open the page can change the rankings.
+Put a password in it and the site is read-only until someone logs in; reading
+stays open so officers can be sent a link. Add an empty private.txt as well
+if even reading should need the password. Both files are read once at
+startup, so restart after changing them.
 """
 from __future__ import annotations
 
 import base64
-import binascii
 import gzip
 import hashlib
 import hmac
@@ -41,11 +32,11 @@ import json
 import os
 import re
 import secrets
-import socket
 import ssl
 import sys
 import threading
 import time
+from functools import lru_cache
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -60,36 +51,33 @@ SECRET_FILE = HERE / ".secret"
 PASSWORD_FILE = HERE / "password.txt"
 PRIVATE_FILE = HERE / "private.txt"
 
-MAX_BODY = 64 * 1024 * 1024      # a season of weeks, with every sheet archived
+MAX_BODY = 64 * 1024 * 1024
+DRAIN_LIMIT = 4 * 1024 * 1024
 KEEP_BACKUPS = 10
 SESSION_DAYS = 30
-MAX_CONNECTIONS = 96             # a bot cannot tie up more threads than this
-PER_VISITOR = 16                 # ...and no single address more than this share
-IDLE_TIMEOUT = 20                # seconds a connection may sit saying nothing
-WRITES_PER_MINUTE = 30           # per address; the page batches saves anyway
-LOGIN_TRIES = 10                 # wrong passwords before that address waits
+MAX_CONNECTIONS = 96
+PER_VISITOR = 16
+IDLE_TIMEOUT = 20
+WRITES_PER_MINUTE = 30
+LOGIN_TRIES = 10
 LOGIN_LOCKOUT = 15 * 60
-DRAIN_LIMIT = 4 * 1024 * 1024    # how much of an ignored upload to read anyway
-
 COOKIE = "warroom"
 
-# One lock for everything that touches state.json or uploads/. Saves are rare
-# and small enough that a single lock is simpler than being clever, and it is
-# the only thing standing between two R5s pressing save at the same moment.
+# Guards state.json and uploads/ together: the only thing standing between
+# two R5s pressing save at the same moment.
 LOCK = threading.RLock()
 
 
 # ---------------------------------------------------------------- the state
 
 def read_state() -> dict:
-    """The saved state, or the previous save if the newest one is unreadable."""
     for path in (STATE, BACKUP):
         if not path.is_file():
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            continue                    # truncated by a crash - try the backup
+            continue
         if isinstance(data, dict):
             if path is BACKUP:
                 sys.stderr.write(
@@ -99,13 +87,8 @@ def read_state() -> dict:
 
 
 def write_state(payload: dict) -> int:
-    """Save, in a way that survives the power going out mid-write.
-
-    The bytes go to a temporary file in the same folder and are only then
-    renamed over the real one, which is atomic - state.json is either the old
-    save or the new one, never half of each. The save it replaces is kept as
-    state.json.bak, and a rolling copy goes into backups/.
-    """
+    """Write to a temporary file and rename it over the real one, so a crash
+    mid-save leaves either the old state or the new one, never half of each."""
     with LOCK:
         payload["_rev"] = int(read_state().get("_rev", 0)) + 1
         tmp = STATE.with_name("state.json.new")
@@ -113,7 +96,7 @@ def write_state(payload: dict) -> int:
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(text)
             fh.flush()
-            os.fsync(fh.fileno())       # do not let Windows buffer this away
+            os.fsync(fh.fileno())
         if STATE.is_file():
             os.replace(STATE, BACKUP)
         os.replace(tmp, STATE)
@@ -122,14 +105,11 @@ def write_state(payload: dict) -> int:
 
 
 def _snapshot(text: str, rev: int) -> None:
-    """Keep the last few saves, so a bad edit is not the end of the world.
-
-    The revision is in the name as well as the time, so two saves in the same
-    second are two backups rather than one overwriting the other.
-    """
     try:
         BACKUPS.mkdir(exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
+        # The revision is in the name too, so two saves in one second are two
+        # backups rather than one overwriting the other.
         (BACKUPS / f"state-{stamp}-{rev:06d}.json").write_text(text, encoding="utf-8")
         for old in sorted(BACKUPS.glob("state-*.json"))[:-KEEP_BACKUPS]:
             old.unlink(missing_ok=True)
@@ -138,7 +118,7 @@ def _snapshot(text: str, rev: int) -> None:
 
 
 def valid_state(payload) -> bool:
-    """Is this actually a War Room state? Checked BEFORE anything is written."""
+    """Checked before anything is written, so bad input cannot replace good."""
     if not isinstance(payload, dict) or not isinstance(payload.get("weeks"), list):
         return False
     return all(isinstance(w, dict) for w in payload["weeks"])
@@ -152,24 +132,13 @@ def safe_name(text: str) -> str:
     return (cleaned or "week")[:80]
 
 
-def _wanted_name(label, info, digest: str, taken: set) -> str:
-    """uploads/<week name>.xlsx, with a little of the content hash added only
-    if two different weeks want the same filename."""
-    base = safe_name(label or Path(str(info.get("name") or "week")).stem)
-    name = f"{base}.xlsx"
-    return name if name not in taken else f"{base}-{digest[:8]}.xlsx"
-
-
 def sync_uploads(payload: dict, previous: dict) -> dict:
     """Write each week's workbook to uploads/ and leave a reference behind.
 
-    The page sends a workbook as base64 the first time it sees it and just
-    the hash on every save after that, so a whole season of sheets is not
-    re-uploaded every time somebody nudges a weight. Anything already on disk
-    with the right hash is left alone - no rewriting, no re-reading.
-
-    Returns which hash each week ended up stored under, which is what the
-    page needs in order to refer to it next time instead of sending it.
+    The page sends a workbook as base64 the first time and only its hash
+    afterwards, so a season of sheets is not re-uploaded to change one week.
+    Returns the hash each week was stored under, which is what lets the page
+    refer to it next time.
     """
     known = {}
     for week in previous.get("weeks", []):
@@ -183,23 +152,29 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
         if not isinstance(info, dict):
             week["file"] = None
             continue
+
         raw = info.pop("b64", None)
         data = None
         if raw:
             try:
                 data = base64.b64decode(raw, validate=True)
-            except (ValueError, binascii.Error, TypeError):
+            except (ValueError, TypeError):
                 data = None
-        digest = hashlib.sha256(data).hexdigest() if data is not None \
-            else str(info.get("sha") or "")
+        digest = (hashlib.sha256(data).hexdigest() if data is not None
+                  else str(info.get("sha") or ""))
         if not digest:
             week["file"] = None
             continue
 
-        wanted = _wanted_name(week.get("label"), info, digest, taken)
+        base = safe_name(week.get("label")
+                         or Path(str(info.get("name") or "week")).stem)
+        wanted = f"{base}.xlsx"
+        if wanted in taken:
+            wanted = f"{base}-{digest[:8]}.xlsx"
         stored = known.get(digest, wanted)
-        # A renamed week should end up with a matching filename, but never by
-        # trampling a file another week is using.
+
+        # A renamed week should get a matching filename, but never by
+        # trampling one another week is using.
         if stored != wanted and wanted not in taken and not (UPLOADS / wanted).is_file():
             try:
                 if (UPLOADS / stored).is_file():
@@ -213,9 +188,7 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
             UPLOADS.mkdir(exist_ok=True)
             target.write_bytes(data)
         if not target.is_file():
-            # The page referred to a sheet this server has never held - keep
-            # the week, just without its archived copy.
-            week["file"] = None
+            week["file"] = None          # referred to a sheet we never held
             continue
 
         week["file"] = {"name": info.get("name") or stored, "sha": digest,
@@ -228,8 +201,7 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
 
 
 def _sweep(keep: set) -> None:
-    """Delete archived sheets no week points at any more - a removed or
-    renamed week would otherwise leave its file behind forever."""
+    """Removed and renamed weeks would otherwise leave sheets behind forever."""
     if not UPLOADS.is_dir():
         return
     for path in UPLOADS.glob("*.xlsx"):
@@ -251,11 +223,8 @@ def hydrate(state: dict) -> dict:
         if stored:
             week = dict(week)
             path = UPLOADS / stored
-            if path.is_file():
-                week["file"] = dict(info, b64=base64.b64encode(
-                    path.read_bytes()).decode())
-            else:
-                week["file"] = None
+            week["file"] = (dict(info, b64=base64.b64encode(path.read_bytes()).decode())
+                            if path.is_file() else None)
         weeks.append(week)
     out["weeks"] = weeks
     return out
@@ -263,8 +232,8 @@ def hydrate(state: dict) -> dict:
 
 # ------------------------------------------------------------------- logins
 
+@lru_cache(maxsize=1)
 def password():
-    """The password, from password.txt or the WARROOM_PASSWORD variable."""
     env = os.environ.get("WARROOM_PASSWORD")
     if env and env.strip():
         return env.strip()
@@ -275,8 +244,9 @@ def password():
     return lines[0].strip() if lines and lines[0].strip() else None
 
 
+@lru_cache(maxsize=1)
 def secret() -> bytes:
-    """Random bytes for signing cookies, kept so logins survive a restart."""
+    """Signing key for cookies, kept on disk so logins survive a restart."""
     with LOCK:
         try:
             raw = SECRET_FILE.read_text(encoding="utf-8").strip()
@@ -296,8 +266,7 @@ def secret() -> bytes:
 
 def make_token() -> str:
     body = f"v1.{int(time.time()) + SESSION_DAYS * 86400}"
-    sig = hmac.new(secret(), body.encode(), hashlib.sha256).hexdigest()
-    return f"{body}.{sig}"
+    return f"{body}.{hmac.new(secret(), body.encode(), hashlib.sha256).hexdigest()}"
 
 
 def token_ok(token) -> bool:
@@ -305,8 +274,7 @@ def token_ok(token) -> bool:
         version, expiry, sig = str(token).split(".")
     except ValueError:
         return False
-    good = hmac.new(secret(), f"{version}.{expiry}".encode(),
-                    hashlib.sha256).hexdigest()
+    good = hmac.new(secret(), f"{version}.{expiry}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, good):
         return False
     try:
@@ -316,8 +284,7 @@ def token_ok(token) -> bool:
 
 
 class Limiter:
-    """Counts recent attempts per address. Used for both wrong passwords and
-    a flood of saves - neither should be able to hammer the server."""
+    """Recent attempts per address, for wrong passwords and floods of saves."""
 
     def __init__(self):
         self.hits = {}
@@ -329,7 +296,7 @@ class Limiter:
             recent = [t for t in self.hits.get(who, []) if now - t < window]
             recent.append(now)
             self.hits[who] = recent
-            if len(self.hits) > 2000:            # never grow without bound
+            if len(self.hits) > 2000:
                 self.hits = {k: v for k, v in self.hits.items()
                              if v and now - v[-1] < window}
             return len(recent)
@@ -351,23 +318,21 @@ WRITES = Limiter()
 # ------------------------------------------------------------------ serving
 
 class Handler(BaseHTTPRequestHandler):
-    """Only a few things are reachable: the page, the state API and the login.
+    """Serves the page, the state API and the login, and nothing else.
 
-    Serving the folder itself - which is what the obvious
-    SimpleHTTPRequestHandler does - would also hand out state.json, the
-    uploads folder, the log and, with https on, the certificate's private
-    key. So nothing is served except by name, below.
+    Serving the folder - what SimpleHTTPRequestHandler would do - also hands
+    out state.json, the uploads, the log and the certificate's private key.
     """
 
     server_version = "WarRoom"
     sys_version = ""
-    protocol_version = "HTTP/1.1"        # keep-alive: the page is a big file
+    protocol_version = "HTTP/1.1"
     timeout = IDLE_TIMEOUT
+    _read_body = False
 
-    # Anything on a public port gets probed by bots within minutes, and an
-    # https:// request to this http:// server arrives as a page of binary
-    # rubbish. None of it matters, and all of it makes the window unreadable,
-    # so junk is counted quietly instead of printed.
+    # A public port is probed by bots within minutes, and an https request to
+    # this http server arrives as binary rubbish. Counted quietly instead of
+    # filling the window.
     junk = 0
 
     def _is_junk(self, text: str) -> bool:
@@ -378,33 +343,24 @@ class Handler(BaseHTTPRequestHandler):
             msg = fmt % args
         except Exception:
             return
-        if self._is_junk(msg):
-            return          # counted once in log_error, not twice
-        sys.stderr.write("%s %s\n" % (self.address_string(), msg))
+        if not self._is_junk(msg):
+            sys.stderr.write("%s %s\n" % (self.address_string(), msg))
 
     def log_error(self, fmt, *args):
         try:
             msg = fmt % args
         except Exception:
             return
-        # Browsers open a connection or two and then sit on them; when one
-        # goes quiet for too long we close it. Entirely normal, and not a
-        # probe - saying nothing at all is right.
         if "timed out" in msg:
-            return
-        probes = ("Bad request", "Bad HTTP", "Request line")
-        if any(p in msg for p in probes) or self._is_junk(msg):
+            return                       # a browser leaving a socket idle
+        if any(p in msg for p in ("Bad request", "Bad HTTP", "Request line")) \
+                or self._is_junk(msg):
             Handler.junk += 1
             if Handler.junk in (1, 10) or Handler.junk % 100 == 0:
-                sys.stderr.write(
-                    f"  ({Handler.junk} ignored probes from the internet - "
-                    f"normal, nothing to do)\n")
+                sys.stderr.write(f"  ({Handler.junk} ignored probes from the "
+                                 f"internet - normal, nothing to do)\n")
             return
         sys.stderr.write("%s %s\n" % (self.address_string(), msg))
-
-    # -- small helpers ----------------------------------------------------
-
-    _read_body = False
 
     def handle_one_request(self):
         self._read_body = False
@@ -414,15 +370,13 @@ class Handler(BaseHTTPRequestHandler):
         return self.client_address[0] if self.client_address else "?"
 
     def _drain(self) -> None:
-        """Read an upload we are about to ignore, before answering it.
+        """Read an upload we are about to refuse.
 
-        Replying while the browser is still sending makes the connection
-        close abruptly, and the browser then reports a network error instead
-        of showing the reason we sent - "log in", say. So anything we are
-        not going to read properly gets read and thrown away first, up to a
-        point past which the sender is not being reasonable anyway.
+        Answering while the browser is still sending aborts the connection,
+        and the browser then reports a network error instead of the reason we
+        sent - so "log in" would never be seen.
         """
-        if self._read_body or self.command not in ("PUT", "POST", "PATCH"):
+        if self._read_body or self.command not in ("PUT", "POST"):
             return
         self._read_body = True
         try:
@@ -439,8 +393,6 @@ class Handler(BaseHTTPRequestHandler):
             left -= len(piece)
 
     def _send(self, code: int, body: bytes, ctype: str, extra=()) -> None:
-        """Every response goes through here, so the headers stay consistent
-        and a body is never sent without its length."""
         self._drain()
         encoding = None
         if len(body) > 1400 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
@@ -460,8 +412,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, code: int, payload, extra=()) -> None:
-        self._send(code, json.dumps(payload).encode("utf-8"),
-                   "application/json",
+        self._send(code, json.dumps(payload).encode("utf-8"), "application/json",
                    [("Cache-Control", "no-store"), *extra])
 
     def _fail(self, code: int, message: str) -> None:
@@ -469,15 +420,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _logged_in(self) -> bool:
         if not password():
-            return True                  # no password set: everyone may edit
+            return True
         raw = self.headers.get("Cookie")
         if not raw:
             return False
         try:
-            jar = SimpleCookie(raw)
+            morsel = SimpleCookie(raw).get(COOKIE)
         except Exception:
             return False
-        morsel = jar.get(COOKIE)
         return bool(morsel and token_ok(morsel.value))
 
     def _auth_state(self) -> str:
@@ -493,9 +443,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._page()
         if path == "/api/state":
             return self._get_state()
-        if path == "/api/whoami":
-            return self._json(200, {"auth": self._auth_state(),
-                                    "rev": int(read_state().get("_rev", 0))})
         if self.path.startswith("/.well-known/acme-challenge/"):
             return self._acme()
         self._fail(404, "no such page")
@@ -513,8 +460,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        # The page is one self-contained file; the only thing it reaches out
-        # for is Google's font service.
         csp = ("default-src 'self'; img-src 'self' data:; "
                "script-src 'self' 'unsafe-inline'; "
                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
@@ -525,8 +470,7 @@ class Handler(BaseHTTPRequestHandler):
                     ("Content-Security-Policy", csp)])
 
     def _acme(self):
-        """Let's Encrypt proves the domain is yours by fetching a file from
-        here, so this path keeps working even with everything else locked."""
+        """Certificate renewal fetches a file from here over plain http."""
         name = Path(self.path.split("?")[0]).name
         token = HERE / ".well-known" / "acme-challenge" / name
         if ".." in self.path or not token.is_file():
@@ -544,13 +488,9 @@ class Handler(BaseHTTPRequestHandler):
                                ("X-WarRoom-Auth", self._auth_state())])
 
     def do_POST(self):
-        path = self.path.split("?")[0].rstrip("/") or "/"
-        if path == "/api/login":
-            return self._login()
-        if path == "/api/logout":
-            return self._json(200, {"ok": True},
-                              [("Set-Cookie", self._cookie("", 0))])
-        self._fail(404, "no such page")
+        if (self.path.split("?")[0].rstrip("/") or "/") != "/api/login":
+            return self._fail(404, "no such page")
+        self._login()
 
     def _cookie(self, value: str, age: int) -> str:
         bits = [f"{COOKIE}={value}", "Path=/", f"Max-Age={age}",
@@ -583,7 +523,7 @@ class Handler(BaseHTTPRequestHandler):
                    [("Set-Cookie", self._cookie(make_token(), SESSION_DAYS * 86400))])
 
     def _body(self):
-        """Read exactly Content-Length bytes, or answer for ourselves."""
+        """Exactly Content-Length bytes, or None having already answered."""
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -597,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         self._read_body = True
         chunks, left = [], length
-        while left > 0:                  # a socket read can come up short
+        while left > 0:
             piece = self.rfile.read(min(left, 1 << 20))
             if not piece:
                 break
@@ -632,9 +572,8 @@ class Handler(BaseHTTPRequestHandler):
             current = read_state()
             rev = int(current.get("_rev", 0))
             sent = (self.headers.get("If-Match") or "").strip('" ')
-            # Everyone holds the whole state in their browser, so a save from
-            # somebody working off an older copy would silently wipe whatever
-            # was added in between. Make them reload instead.
+            # Everyone holds the whole state in their browser, so a save built
+            # on an older copy would wipe whatever was added in between.
             if sent.isdigit() and int(sent) != rev:
                 return self._json(409, {"error": "someone else saved first",
                                         "rev": rev})
@@ -647,75 +586,61 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
-    # Windows would otherwise happily start a SECOND copy on a port that is
-    # already in use - it binds, then quietly receives nothing. Better to
-    # fail loudly and tell the user the port is taken.
+    # Windows would otherwise start a SECOND copy on a port already in use:
+    # it binds, then quietly receives nothing.
     allow_reuse_address = False
     daemon_threads = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # One thread per connection, with a ceiling: without it a handful of
-        # opened-and-abandoned sockets can use up the machine. The per-address
-        # share matters just as much - a single bot holding every slot would
-        # keep the site down for the officers just as effectively.
-        self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
-        self._held = {}                  # how many each address has open
-        self._owner = {}                 # which address a connection belongs to
+        # A ceiling on connections, and a per-address share of it - one bot
+        # holding every slot would keep the officers out just as effectively
+        # as using up the machine.
+        self._open = {}
+        self._owner = {}
         self._books = threading.Lock()
 
     def process_request(self, request, client_address):
         who = client_address[0] if client_address else "?"
         with self._books:
-            if self._held.get(who, 0) >= PER_VISITOR:
-                self.close_request(request)      # their share is used up
+            if (self._open.get(who, 0) >= PER_VISITOR
+                    or sum(self._open.values()) >= MAX_CONNECTIONS):
+                self.close_request(request)
                 return
-            if not self._slots.acquire(blocking=False):
-                self.close_request(request)      # no slot at all: drop it
-                return
-            self._held[who] = self._held.get(who, 0) + 1
+            self._open[who] = self._open.get(who, 0) + 1
             self._owner[request] = who
         try:
             super().process_request(request, client_address)
         except Exception:
-            self._give_back(request)
+            self._release(request)
             raise
 
-    def _give_back(self, request) -> None:
-        """Hand back a connection's slot. Safe to call more than once."""
+    def _release(self, request) -> None:
         with self._books:
             who = self._owner.pop(request, None)
             if who is None:
-                return
-            left = self._held.get(who, 1) - 1
-            if left > 0:
-                self._held[who] = left
+                return                   # already released
+            if self._open.get(who, 1) > 1:
+                self._open[who] -= 1
             else:
-                self._held.pop(who, None)
-        self._slots.release()
+                self._open.pop(who, None)
 
     def shutdown_request(self, request):
         try:
             super().shutdown_request(request)
         finally:
-            self._give_back(request)
+            self._release(request)
 
     def handle_error(self, request, client_address):
-        # A dropped connection is normal on a public port and is not worth a
-        # traceback in the log.
         exc = sys.exc_info()[1]
-        if isinstance(exc, (ConnectionError, socket.timeout, ssl.SSLError)):
-            return
+        if isinstance(exc, (ConnectionError, TimeoutError, ssl.SSLError)):
+            return                       # normal on a public port
         super().handle_error(request, client_address)
 
 
 class TLSServer(Server):
-    """HTTPS, with the certificate re-read whenever it changes on disk.
-
-    Certificates last 90 days and are renewed by a background task. Wrapping
-    each connection as it arrives - rather than the listening socket once at
-    startup - means a renewal is picked up without restarting anything.
-    """
+    """Wraps each connection as it arrives rather than the listening socket
+    once, so a certificate renewal is picked up without a restart."""
 
     def __init__(self, addr, handler, cert, key):
         super().__init__(addr, handler)
@@ -737,16 +662,16 @@ class TLSServer(Server):
     def get_request(self):
         sock, addr = self.socket.accept()
         try:
-            sock.settimeout(IDLE_TIMEOUT)     # do not hang on a half-open probe
+            sock.settimeout(IDLE_TIMEOUT)
             return self._context().wrap_socket(sock, server_side=True), addr
         except (ssl.SSLError, OSError):
-            sock.close()                      # a probe, or plain http on 443
+            sock.close()                 # a probe, or plain http on 443
             raise BlockingIOError
 
 
 class RedirectHandler(Handler):
-    """Port 80 once the owner has confirmed https works: renewal checks stay
-    on http, everything else is bounced across."""
+    """Port 80 once https is confirmed working: renewals stay on http,
+    everything else is bounced across."""
 
     def do_GET(self):
         if self.path.startswith("/.well-known/acme-challenge/"):
@@ -763,17 +688,13 @@ class RedirectHandler(Handler):
 # --------------------------------------------------------------- certificate
 
 def find_cert():
-    """Locate the certificate, however it happens to be named.
-
-    cert.pem / key.pem win if present, otherwise win-acme's own naming is
-    accepted so renewals are picked up without renaming. A full chain is
-    preferred - some browsers reject a bare certificate.
-    """
+    """cert.pem/key.pem, or win-acme's own naming so renewals are picked up."""
     if (HERE / "cert.pem").is_file() and (HERE / "key.pem").is_file():
         return HERE / "cert.pem", HERE / "key.pem"
     keys = sorted(HERE.glob("*-key.pem"), key=lambda p: p.stat().st_mtime, reverse=True)
     for key in keys:
         stem = key.name[: -len("-key.pem")]
+        # A full chain first - some browsers reject a bare certificate.
         for suffix in ("-crt-chain.pem", "-chain.pem", "-crt.pem", ".pem"):
             cert = HERE / (stem + suffix)
             if cert.is_file() and cert != key:
@@ -795,69 +716,44 @@ def bind(cls, port, *args, fatal=True):
         sys.exit(1)
 
 
-def main() -> None:
-    # When this runs as a startup task its output goes to a file, and block
-    # buffering would hold messages back for ages. Keep it line by line.
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-        sys.stderr.reconfigure(line_buffering=True)
-    except Exception:
-        pass
-
-    args = list(sys.argv[1:])
-    # "server.py http" forces plain http even when a certificate is present.
-    force_http = any(a.lower() in ("http", "--http", "-http") for a in args)
-    ports = [a for a in args if a.isdigit()]
-
-    cert, key = find_cert()
-    if force_http:
-        cert = key = None
-
-    servers = []
+def start(cert, key, ports):
+    """Which ports to listen on, as (scheme, port, server)."""
     if ports:
-        # An explicit port means exactly that port, and nothing else.
         port = int(ports[0])
         if cert:
-            servers.append(("https", port, bind(TLSServer, port, Handler, cert, key)))
-        else:
-            servers.append(("http", port, bind(Server, port, Handler)))
-    elif cert:
-        # https on 443 AND the plain site on 80. If 443 turns out to be
-        # blocked by the VPS firewall the site still answers on 80, which is
-        # the failure this used to have: switching encryption on should never
-        # be able to take the whole site down.
-        tls = bind(TLSServer, 443, Handler, cert, key, fatal=False)
-        if tls:
-            servers.append(("https", 443, tls))
-        else:
-            print("  (port 443 is busy - carrying on without encryption)")
-        redirect = tls and (HERE / "redirect-to-https.txt").is_file()
-        plain = bind(Server, 80, RedirectHandler if redirect else Handler,
-                     fatal=not tls)
-        if plain:
-            servers.append(("http", 80, plain))
-        elif tls:
-            print("  (port 80 is busy - certificate renewal may fail)")
+            return [("https", port, bind(TLSServer, port, Handler, cert, key))]
+        return [("http", port, bind(Server, port, Handler))]
+    if not cert:
+        return [("http", 80, bind(Server, 80, Handler))]
+
+    # https on 443 AND the plain site on 80: if 443 turns out to be blocked at
+    # the VPS firewall the site is still reachable rather than appearing dead.
+    running = []
+    tls = bind(TLSServer, 443, Handler, cert, key, fatal=False)
+    if tls:
+        running.append(("https", 443, tls))
     else:
-        servers.append(("http", 80, bind(Server, 80, Handler)))
+        print("  (port 443 is busy - carrying on without encryption)")
+    redirect = tls and (HERE / "redirect-to-https.txt").is_file()
+    plain = bind(Server, 80, RedirectHandler if redirect else Handler, fatal=not tls)
+    if plain:
+        running.append(("http", 80, plain))
+    elif tls:
+        print("  (port 80 is busy - certificate renewal may fail)")
+    return running
 
-    servers = [s for s in servers if s[2]]
-    if not servers:
-        sys.exit("  nothing could be started - every port was busy")
 
-    for _, _, srv in servers[1:]:
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-
-    scheme, port, main_server = servers[0]
-    shown = "" if port in (80, 443) else f":{port}"
-    print(f"Kingdom War Room  ->  {scheme}://localhost{shown}")
+def announce(servers, cert):
+    scheme, port, _ = servers[0]
+    def shown(p):
+        return "" if p in (80, 443) else f":{p}"
+    print(f"Kingdom War Room  ->  {scheme}://localhost{shown(port)}")
     print(f"  serving   {INDEX}")
     print(f"  state     {STATE}")
     print(f"  uploads   {UPLOADS}")
     print(f"  backups   {BACKUPS}")
     for other_scheme, other_port, _ in servers[1:]:
-        extra = "" if other_port in (80, 443) else f":{other_port}"
-        print(f"  also on   {other_scheme}://localhost{extra}")
+        print(f"  also on   {other_scheme}://localhost{shown(other_port)}")
     if cert:
         print(f"  encrypted using {cert.name}")
     else:
@@ -872,8 +768,30 @@ def main() -> None:
         print("            the rankings. Put one in password.txt if this")
         print("            machine is reachable from the internet.")
     print("  Ctrl+C to stop")
+
+
+def main() -> None:
+    # As a startup task the output goes to a file, where block buffering would
+    # hold messages back for ages.
     try:
-        main_server.serve_forever()
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
+    args = list(sys.argv[1:])
+    force_http = any(a.lower() in ("http", "--http", "-http") for a in args)
+    cert, key = (None, None) if force_http else find_cert()
+
+    servers = [s for s in start(cert, key, [a for a in args if a.isdigit()]) if s[2]]
+    if not servers:
+        sys.exit("  nothing could be started - every port was busy")
+    for _, _, srv in servers[1:]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    announce(servers, cert)
+    try:
+        servers[0][2].serve_forever()
     except KeyboardInterrupt:
         print("\nstopped")
 

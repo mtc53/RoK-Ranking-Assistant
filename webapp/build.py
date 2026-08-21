@@ -16,9 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP = ROOT / "webapp"
-OUT = ROOT / "output" / "warroom.html"          # for publishing as an Artifact
+OUT = ROOT / "output" / "warroom.html"           # for publishing as an Artifact
 SELFHOST = ROOT / "selfhost"                     # for hosting anywhere else
-
 
 # Must match PACK_FIELDS in page.html.
 PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
@@ -26,6 +25,16 @@ PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
                "tech_donations", "building_time_s", "times_helped",
                "resources_donated", "forts_destroyed", "armory_points",
                "last_login", "days_inactive", "days_in_alliance"]
+
+# Everything the server needs, and nothing else.
+SHIPPED = ("server.py", "README.txt", "start.bat", "open-firewall.bat",
+           "check.py", "check.bat")
+
+# What the running server writes next to itself. selfhost/ can be the live
+# server directory, so a rebuild must never delete these.
+RUNTIME = {"state.json", "state.json.bak", "state.json.new", "server.log",
+           "password.txt", "private.txt", "redirect-to-https.txt", ".secret",
+           "cert.pem", "key.pem"}
 
 
 def seed_weeks() -> list:
@@ -38,7 +47,6 @@ def seed_weeks() -> list:
         return []
     weeks = []
     for w in load_all_weeks(activity):
-        # Archive the workbook itself when the week came from a single file.
         files = sorted(p for p in Path(w["folder"]).rglob("*.xlsx")
                        if not p.name.startswith("~$"))
         archived = None
@@ -52,35 +60,16 @@ def seed_weeks() -> list:
             "scanDate": w["scan_date"].isoformat() + "Z",
             "summaries": w["summaries"],
             "cols": PACK_FIELDS,
-            # last_login is only used while parsing, so it is dropped here.
             "rows": [[None if f == "last_login" else m.get(f) for f in PACK_FIELDS]
                      for m in w["members"]],
         })
     return weeks
 
 
-def build() -> Path:
-    page = (WEBAPP / "page.html").read_text(encoding="utf-8")
-    app = (WEBAPP / "app.js").read_text(encoding="utf-8")
-    cfg = tomllib.load((ROOT / "config.toml").open("rb"))
-
-    # The published page is one file, so the engine is inlined as a classic
-    # script rather than imported as a module.
-    app = re.sub(r"^export ", "", app, flags=re.M)
-
-    out = page.replace("/*__APP__*/", app)
-    out = out.replace("/*__CONFIG__*/", json.dumps(cfg, indent=2))
-    out = out.replace("/*__SEED__*/", json.dumps(seed_weeks(), separators=(",", ":")))
-
-    if "/*__APP__*/" in out or "/*__CONFIG__*/" in out or "/*__SEED__*/" in out:
-        sys.exit("build failed: a placeholder was not replaced")
-
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(out, encoding="utf-8")
-
-    # Self-host build: the same page wrapped as a complete HTML document.
-    title = out.split("</title>")[0].split("<title>")[-1]
-    head = [
+def wrap(page: str) -> str:
+    """The same page as a complete HTML document, for hosting."""
+    title = page.split("</title>")[0].split("<title>")[-1]
+    head = "\n".join([
         "<!doctype html>",
         '<html lang="en">',
         "<head>",
@@ -89,34 +78,40 @@ def build() -> Path:
         f"<title>{title}</title>",
         "</head>",
         "<body>",
-    ]
-    doc = "\n".join(head) + out.split("</title>", 1)[1] + "\n</body>\n</html>\n"
+    ])
+    return head + page.split("</title>", 1)[1] + "\n</body>\n</html>\n"
+
+
+def build() -> Path:
+    page = (WEBAPP / "page.html").read_text(encoding="utf-8")
+    app = (WEBAPP / "app.js").read_text(encoding="utf-8")
+    cfg = tomllib.load((ROOT / "config.toml").open("rb"))
+
+    # One file, so the engine is inlined as a classic script, not imported.
+    app = re.sub(r"^export ", "", app, flags=re.M)
+
+    out = page.replace("/*__APP__*/", app)
+    out = out.replace("/*__CONFIG__*/", json.dumps(cfg, indent=2))
+    out = out.replace("/*__SEED__*/", json.dumps(seed_weeks(), separators=(",", ":")))
+    for placeholder in ("/*__APP__*/", "/*__CONFIG__*/", "/*__SEED__*/"):
+        if placeholder in out:
+            sys.exit(f"build failed: {placeholder} was not replaced")
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(out, encoding="utf-8")
+
     SELFHOST.mkdir(parents=True, exist_ok=True)
-    (SELFHOST / "index.html").write_text(doc, encoding="utf-8")
-    # Only what actually has to sit on the server. The https scripts stay
-    # in webapp/ as sources and are not shipped, since the site runs on
-    # plain http.
-    for extra in ("server.py", "README.txt", "start.bat", "open-firewall.bat",
-                  "check.py", "check.bat", "install-autostart.bat"):
-        src = WEBAPP / extra
+    (SELFHOST / "index.html").write_text(wrap(out), encoding="utf-8")
+    for name in SHIPPED:
+        src = WEBAPP / name
         if src.is_file():
-            (SELFHOST / extra).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    # Drop anything left from an earlier build so the folder stays exactly
-    # the set of files that belong there - but never touch what the running
-    # server writes here itself (state.json, uploads/, its log, a
-    # certificate): SELFHOST can be the live, in-place server directory, not
-    # just a scratch build target.
-    keep = {"index.html", "server.py", "README.txt", "start.bat",
-            "open-firewall.bat", "check.py", "check.bat", "install-autostart.bat"}
-    runtime = {"state.json", "state.json.bak", "state.json.new", "server.log",
-               "password.txt", "private.txt", "redirect-to-https.txt",
-               ".secret", "cert.pem", "key.pem"}
+            (SELFHOST / name).write_text(src.read_text(encoding="utf-8"),
+                                         encoding="utf-8")
+
+    keep = {"index.html", *SHIPPED} | RUNTIME
     for stale in SELFHOST.iterdir():
-        if not stale.is_file() or stale.name in keep or stale.name in runtime:
-            continue
-        if stale.suffix == ".pem":   # win-acme's own certificate naming
-            continue
-        stale.unlink()
+        if stale.is_file() and stale.name not in keep and stale.suffix != ".pem":
+            stale.unlink()
     return OUT
 
 
