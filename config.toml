@@ -1,0 +1,112 @@
+# =============================================================
+#  RoK Alliance Weekly Ranking - configuration
+#  Edit the numbers below to change how members are ranked.
+#  No code changes needed - just save this file and re-run.
+# =============================================================
+
+[scoring]
+# How each raw stat is turned into a 0-100 metric score:
+#   "hybrid"     -> half relative standing, half absolute size (recommended)
+#   "percentile" -> pure relative standing vs everyone else
+#   "normalized" -> pure absolute size, capped at the p95 performer
+# Hybrid stops one KvK whale from drowning out 350 members while still
+# giving credit for genuinely big numbers.
+curve = "hybrid"
+
+# Value treated as "full marks" for the normalized half of the curve,
+# as a percentile of the pool. 95 = the top 5% all cap out at 100.
+cap_percentile = 95
+
+# "global"   -> everyone in every alliance is ranked in one pool
+#               (fairest cross-alliance comparison)
+# "alliance" -> each member is scored only against their own alliance
+pool = "global"
+
+
+# -------------------------------------------------------------
+# Does each stat keep counting up from the baseline scan, or does
+# it reset every week?
+#
+#   "delta" - score the week-over-week increase (for stats that keep
+#             counting up across exports, like kill score).
+#   "raw"   - score the number exactly as exported (for stats the game
+#             resets every week, like donations and helps).
+#   "auto"  - work it out from the data. Only useful if you are unsure.
+#
+# Power is not listed here: it is a running total by nature, so its
+# growth is always measured against the previous week.
+# -------------------------------------------------------------
+[metric_mode]
+# Set from how the game actually reports these, not guessed from the data.
+# Kill score is a lifetime running total, so only the WEEKLY INCREASE counts:
+# a member who added 20M beats one sitting on 100M who added 10M.
+kill_score        = "delta"
+# These reset every week, so the exported number already IS this week's
+# contribution and is scored exactly as it stands.
+tech_donations    = "raw"
+times_helped      = "raw"
+building_time_s   = "raw"
+forts_destroyed   = "raw"
+armory_points     = "raw"
+resources_donated = "raw"
+
+# -------------------------------------------------------------
+# Weights: what each activity is worth. They do NOT need to add
+# up to 100 - they are normalised automatically. Set any weight
+# to 0 to drop that metric from the score completely.
+# -------------------------------------------------------------
+[weights]
+kill_score        = 21   # kill points gained this week (shown as "Kills +")
+tech_donations    = 19   # alliance technology donated
+times_helped      = 16   # alliance helps given
+armory_points     = 14   # armory contribution
+forts_destroyed   = 13   # forts / flags destroyed
+power_growth      = 10   # account growth vs last week (needs 2+ weeks)
+building_time_s   = 7    # building time contributed via helps
+resources_donated = 0    # off - not counted toward the score
+
+# Which scorecard category each metric rolls up into, for the report.
+[categories]
+kill_score        = "Combat"
+forts_destroyed   = "Combat"
+tech_donations    = "Support"
+times_helped      = "Support"
+building_time_s   = "Support"
+resources_donated = "Support"
+armory_points     = "Armory"
+power_growth      = "Growth"
+
+
+# -------------------------------------------------------------
+# Inactivity penalty. The final score is multiplied by the factor
+# of the highest threshold the member's "Days Inactive" reaches.
+# Format: [days_inactive_at_or_above, multiplier]
+# -------------------------------------------------------------
+[inactivity]
+penalties = [
+  [0,  1.00],
+  [2,  0.95],
+  [4,  0.85],
+  [7,  0.60],
+  [14, 0.35],
+  [30, 0.15],
+]
+
+# -------------------------------------------------------------
+# Tier cut-offs, as a percentile of the final score in the pool.
+# At or above the S number lands in S, and so on. Below D is F.
+# -------------------------------------------------------------
+[tiers]
+S = 90
+A = 75
+B = 50
+C = 25
+D = 10
+
+# -------------------------------------------------------------
+# Flags driving the action list at the top of the report.
+# -------------------------------------------------------------
+[flags]
+inactive_days     = 7    # days inactive at/above this -> INACTIVE
+dead_days         = 14   # days inactive at/above this -> DEAD (kick candidate)
+low_score         = 25   # final score below this -> LOW ACTIVITY

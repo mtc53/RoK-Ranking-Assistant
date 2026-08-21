@@ -1,0 +1,1136 @@
+<title>Kingdom War Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* One committed dark treatment - a war room for a game played on a dark
+     screen. Every colour is painted explicitly so the page holds on whatever
+     ground the host renders it over. */
+  :root{
+    --ground:#151823; --panel:#1c2030; --raised:#232839; --line:#2f3548;
+    --ink:#e8e6df; --dim:#9aa1b4; --faint:#6b7286;
+    --brass:#c8963e; --brass-dim:#8a6a2f;
+    --good:#5fa971; --warn:#c9803f; --crit:#b8474d; --steel:#5b7fb0;
+    --S:#c8963e; --A:#5fa971; --B:#5b7fb0; --C:#8c93a6; --D:#c9803f; --F:#b8474d;
+    --display:"Oswald","Haettenschweiler","Arial Narrow",sans-serif;
+    --body:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+    --mono:"IBM Plex Mono","Cascadia Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--body);
+       font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1760px;margin:0 auto;padding:24px 14px 64px;
+        display:flex;flex-direction:column;gap:24px}
+  .num,td.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  button{font-family:var(--display);font-weight:500;letter-spacing:.9px;
+         text-transform:uppercase;font-size:11.5px;cursor:pointer;border-radius:2px;
+         padding:8px 15px;border:1px solid var(--line);background:var(--raised);color:var(--ink)}
+  button:hover{border-color:var(--brass);color:var(--brass)}
+  button.primary{background:var(--brass);border-color:var(--brass);color:#151823}
+  button.primary:hover{filter:brightness(1.1);color:#151823}
+  button.danger:hover{border-color:var(--crit);color:var(--crit)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{
+    outline:2px solid var(--brass);outline-offset:1px}
+
+  header{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;
+         border-bottom:2px solid var(--brass-dim);padding-bottom:13px}
+  h1{font-family:var(--display);font-weight:600;font-size:29px;letter-spacing:.6px;
+     text-transform:uppercase;margin:0;line-height:1.1}
+  h1 em{font-style:normal;color:var(--brass)}
+  .sub{color:var(--dim);font-family:var(--mono);font-size:12px;margin-left:auto;text-align:right}
+  h2{font-family:var(--display);font-size:15px;text-transform:uppercase;
+     letter-spacing:1.6px;color:var(--dim);margin:0 0 11px;font-weight:500}
+  section{display:flex;flex-direction:column}
+
+  .chipbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chip{background:var(--raised);border:1px solid var(--line);color:var(--dim);
+        border-radius:2px;padding:7px 14px;cursor:pointer;font-size:11.5px;
+        font-family:var(--display);font-weight:500;letter-spacing:.9px;text-transform:uppercase}
+  .chip.on{background:var(--brass);border-color:var(--brass);color:#151823}
+  .status{font-family:var(--mono);font-size:11.5px;padding:4px 10px;border-radius:2px;
+          border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .status.ok{color:var(--good);border-color:#2c5439}
+  .status.busy{color:var(--brass);border-color:var(--brass-dim)}
+  .status.err{color:var(--crit);border-color:#5a2c30}
+
+  details.tool{background:var(--panel);border:1px solid var(--line);border-radius:3px}
+  details.tool>summary{cursor:pointer;padding:12px 16px;font-family:var(--display);
+      font-size:12.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--brass);
+      font-weight:500;list-style:none;display:flex;align-items:center;gap:10px}
+  details.tool>summary::-webkit-details-marker{display:none}
+  details.tool>summary::before{content:"\25B8";transition:transform .15s}
+  details.tool[open]>summary::before{transform:rotate(90deg)}
+  .toolbody{padding:0 16px 16px;display:flex;flex-direction:column;gap:14px}
+
+  .drop{border:2px dashed var(--line);border-radius:3px;padding:24px;text-align:center;
+        color:var(--dim);background:var(--ground);transition:border-color .15s}
+  .drop.over{border-color:var(--brass);color:var(--brass)}
+  .drop p{margin:6px 0 0;font-size:12.5px;color:var(--faint)}
+
+  .weeklist{display:flex;flex-direction:column;gap:7px}
+  .weekrow{display:flex;align-items:center;gap:10px;background:var(--raised);
+           border:1px solid var(--line);border-left:3px solid var(--brass-dim);
+           border-radius:2px;padding:8px 11px}
+  .weekrow input{flex:1;min-width:80px;background:var(--ground);border:1px solid var(--line);
+                 color:var(--ink);border-radius:2px;padding:5px 8px;font-family:var(--body);
+                 font-size:13px}
+  .weekrow .meta{font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap}
+
+  .wgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px}
+  .wfield{display:flex;align-items:center;gap:9px;background:var(--raised);
+          border:1px solid var(--line);border-radius:2px;padding:7px 11px}
+  .wfield label{flex:1;font-size:12.5px;color:var(--dim)}
+  .wfield input{width:62px;background:var(--ground);border:1px solid var(--line);
+                color:var(--ink);border-radius:2px;padding:5px 7px;font-family:var(--mono);
+                font-size:13px;text-align:right}
+  .wfield .pct{width:38px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--faint)}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--brass);
+        border-radius:3px;padding:13px 15px;display:flex;flex-direction:column;gap:2px}
+  .card .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:1.1px;
+           font-family:var(--display);font-weight:500}
+  .card .v{font-size:25px;font-weight:600;font-family:var(--mono);line-height:1.2}
+  .card .n{font-size:11.5px;color:var(--faint)}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+  .scroll{overflow-x:auto;max-height:76vh;overflow-y:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  /* Column separators. The last one is dropped so the grid does not end in a
+     stray line against the panel edge. */
+  .panel th,.panel td{border-right:1px solid var(--line)}
+  .panel th:last-child,.panel td:last-child{border-right:none}
+  th{font-family:var(--display);font-weight:500;color:var(--dim);font-size:10px;
+     text-transform:uppercase;letter-spacing:.6px;cursor:pointer;user-select:none;
+     position:sticky;top:0;background:var(--raised);z-index:2}
+  th:hover{color:var(--ink)}
+  th.sorted{color:var(--brass)}
+  th.sorted::after{content:" \25BC";font-size:8px}
+  th.sorted.asc::after{content:" \25B2"}
+  tbody tr{border-left:3px solid transparent}
+  tbody tr:hover{background:var(--raised)}
+  td.num{text-align:right}
+  /* Spare width is shared out across every column rather than piling into
+     whichever one happens to be most flexible. */
+  #memberTable{table-layout:auto;width:auto;min-width:0}
+  #memberTable th,#memberTable td{padding-left:calc(8px + var(--spread,0px));
+                                  padding-right:calc(8px + var(--spread,0px))}
+  #memberTable td .sub2{margin-left:4px}
+  /* A handful of members carry two tags at once. Without this the whole
+     column widens to fit them; letting just those cells wrap keeps it tight. */
+  #memberTable th.status{width:1px}
+  #memberTable td.status{white-space:normal;max-width:104px;line-height:1.35}
+  #memberTable td.status .flag{margin-bottom:2px}
+  tr.sev-crit{border-left-color:var(--crit)}
+  tr.sev-warn{border-left-color:var(--warn)}
+  tr.sev-low{border-left-color:var(--brass-dim)}
+
+  .tier{display:inline-block;min-width:21px;text-align:center;font-weight:600;
+        font-family:var(--display);border-radius:2px;padding:1px 6px;font-size:12px;color:#151823}
+  .tier.S{background:var(--S)} .tier.A{background:var(--A)} .tier.B{background:var(--B)}
+  .tier.C{background:var(--C)} .tier.D{background:var(--D)} .tier.F{background:var(--F)}
+  .bar{position:relative;background:var(--ground);border-radius:2px;height:17px;min-width:92px;
+       border:1px solid var(--line)}
+  .bar i{position:absolute;inset:0 auto 0 0;border-radius:1px;
+         background:linear-gradient(90deg,var(--brass-dim),var(--brass))}
+  .bar b{position:relative;font-size:11.5px;font-weight:600;padding-left:6px;line-height:15px;
+         font-family:var(--mono)}
+  .up{color:var(--good)} .down{color:var(--crit)} .flat{color:var(--faint)}
+  .sub2{font-size:10.5px;color:var(--faint);font-family:var(--mono)}
+
+  .flag{display:inline-block;font-size:9.5px;font-weight:600;letter-spacing:.5px;
+        font-family:var(--display);text-transform:uppercase;
+        padding:1px 5px;border-radius:2px;margin-right:3px;border:1px solid}
+  .flag.DEAD{color:var(--crit);border-color:#5a2c30;background:#2a1a1d}
+  .flag.INACTIVE{color:var(--warn);border-color:#5a4229;background:#2a2119}
+  .flag.LOW{color:var(--brass);border-color:#544224;background:#26211a}
+  .flag.NO-SUPPORT,.flag.NO-BASELINE{color:var(--dim);border-color:#394054;background:#1e2230}
+
+  .controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:11px}
+  input[type=search],input[type=number],select{background:var(--raised);border:1px solid var(--line);
+      color:var(--ink);border-radius:2px;padding:8px 11px;font-size:13px;font-family:var(--body)}
+  input[type=search]{min-width:215px}
+  .topx{display:flex;align-items:center;gap:8px;background:var(--raised);
+        border:1px solid var(--brass-dim);border-radius:2px;padding:4px 6px 4px 13px}
+  .topx label{font-family:var(--display);font-weight:500;font-size:11px;
+      text-transform:uppercase;letter-spacing:.9px;color:var(--dim)}
+  #topXInput{width:56px;text-align:center;font-family:var(--mono);font-size:16px;
+      font-weight:600;color:var(--brass);background:var(--ground);
+      border:1px solid var(--brass-dim);border-radius:2px;padding:6px}
+  .count{color:var(--faint);font-size:12px;margin-left:auto;font-family:var(--mono)}
+
+  tr.detail>td{background:var(--raised);white-space:normal;padding:15px 18px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:20px}
+  .grid2>div{min-width:0;overflow-wrap:anywhere}
+  .grid2>div>b{font-family:var(--display);font-size:11.5px;text-transform:uppercase;
+        letter-spacing:1.1px;color:var(--brass);font-weight:500}
+  /* These rows sit in columns of very different widths - the full-width
+     rankings table and the half-width action list - so every part has to be
+     able to shrink instead of spilling into the next column. */
+  .mrow{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px;min-width:0}
+  .mrow .lbl{flex:0 1 118px;min-width:0;color:var(--dim);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mrow .val{flex:0 0 auto;min-width:58px;text-align:right;color:var(--faint);
+             font-family:var(--mono);white-space:nowrap}
+  .mini{flex:1 1 36px;background:var(--ground);height:8px;border-radius:2px;
+        position:relative;min-width:24px;border:1px solid var(--line)}
+  .mini i{position:absolute;inset:0 auto 0 0;background:var(--steel);border-radius:1px}
+  .expander{cursor:pointer}
+  .expander:hover .nm{color:var(--brass)}
+  .note{color:var(--faint);font-size:12px;margin:9px 0 0}
+  .banner{background:#241f17;border:1px solid var(--brass-dim);border-left:3px solid var(--brass);
+          color:#e2cd9f;padding:11px 15px;border-radius:3px;font-size:13px}
+  .banner.bad{background:#241a1b;border-color:#5a2c30;color:#e6b3b3}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .split>*,.grid2>*,.cards>*,.wgrid>*{min-width:0}
+  @media(max-width:900px){.split{grid-template-columns:1fr}.mrow .lbl{flex-basis:98px}
+    .sub{margin-left:0;text-align:left}}
+  footer{padding-top:15px;border-top:1px solid var(--line);color:var(--faint);
+         font-size:11.5px;font-family:var(--mono)}
+  .empty{padding:40px 20px;text-align:center;color:var(--dim)}
+  .faq{max-width:70ch;display:flex;flex-direction:column;gap:2px}
+  .faq h3{font-family:var(--display);font-size:13px;text-transform:uppercase;
+          letter-spacing:1.1px;color:var(--brass);font-weight:500;
+          margin:16px 0 4px}
+  .faq h3:first-child{margin-top:0}
+  .faq p{margin:0 0 8px;color:var(--dim);font-size:13.5px}
+  .faq ul{margin:0 0 10px;padding-left:18px;color:var(--dim);font-size:13.5px}
+  .faq li{margin:3px 0}
+  .faq b{color:var(--ink);font-weight:600}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Kingdom <em>War Room</em></h1>
+    <div class="sub" id="subtitle">loading&hellip;</div>
+  </header>
+
+  <div id="notice"></div>
+
+  <details class="tool" id="helpTool">
+    <summary>How this works &ndash; read me first</summary>
+    <div class="toolbody">
+      <div class="faq">
+        <h3>What is this?</h3>
+        <p>Every member of our kingdom, ranked on what they actually did
+        this week. It reads the weekly kingdom export straight from the
+        spreadsheet &ndash; nobody has to add anything up by hand.</p>
+
+        <h3>How do I add a new week?</h3>
+        <p>Open <b>Weekly spreadsheets</b> above, then drag the <b>.xlsx</b>
+        export onto the box (or click <b>Choose .xlsx files</b>). The rankings
+        rebuild straight away. Weeks sort themselves by the scan date inside
+        the file, so it does not matter what order you add them in.</p>
+        <p>Uploading the same week twice replaces it rather than duplicating
+        it, so a corrected export is safe to re-upload.</p>
+
+        <h3>What does the score mean?</h3>
+        <p>A number from 0 to 100 measuring this week&rsquo;s effort against
+        everyone else in the kingdom. It is <b>not</b> a measure of how
+        big an account is &ndash; a well-run small account can outscore a whale
+        who did nothing.</p>
+        <p>It blends how a member ranks against everyone with how large their
+        numbers are in absolute terms, so one enormous KvK score cannot drown
+        out the other 480 people.</p>
+
+        <h3>What are the tiers?</h3>
+        <p>Cut by position, every week:</p>
+        <ul>
+          <li><span class="tier S">S</span> top 10% &ndash; carrying the kingdom</li>
+          <li><span class="tier A">A</span> next 15% &ndash; strong contributors</li>
+          <li><span class="tier B">B</span> and <span class="tier C">C</span> the middle 50%</li>
+          <li><span class="tier D">D</span> next 15% &ndash; needs a nudge</li>
+          <li><span class="tier F">F</span> bottom 10% &ndash; barely showed up</li>
+        </ul>
+
+        <h3>What do the tags mean?</h3>
+        <ul>
+          <li><span class="flag DEAD">DEAD</span> not logged in for 14+ days</li>
+          <li><span class="flag INACTIVE">INACTIVE</span> not logged in for 7+ days</li>
+          <li><span class="flag LOW">LOW</span> scored under 25 this week</li>
+          <li><span class="flag NO-SUPPORT">NO SUPPORT</span> zero tech donations, helps and building time</li>
+          <li><span class="flag NO-BASELINE">NO BASELINE</span> not in last week&rsquo;s export, so their weekly gain cannot be worked out yet</li>
+        </ul>
+
+        <h3>What is the difference between Kill and Kill +?</h3>
+        <p><b>Kill</b> is their total kill points, built up over the whole game.
+        <b>Kill +</b> is how much they added <b>this week</b> &ndash; and that is
+        the one the ranking uses. Someone who added 20M beats someone sitting on
+        a 100M total who added 10M. <b>Power</b> and <b>Power +</b> work the same
+        way.</p>
+        <p>Both read 0 in the very first week, because there is no earlier week
+        to measure the gain against. They start counting once a second week is
+        added.</p>
+
+        <h3>Can I change what counts?</h3>
+        <p>Yes &ndash; open <b>Scoring weights</b> above. Raise what matters to
+        us, set anything to 0 to drop it entirely. The percentages show each
+        stat&rsquo;s real share. Everything recalculates instantly, for everyone.
+        <b>Reset to defaults</b> undoes any mess.</p>
+
+        <h3>Are the spreadsheets kept?</h3>
+        <p>Yes. Every upload is stored exactly as it came in, so a week can
+        always be rebuilt. <b>Download backup</b> saves the lot &ndash; every
+        week, every setting and every original spreadsheet &ndash; as one file.
+        Worth doing occasionally.</p>
+
+        <h3>How do I get a list of top members?</h3>
+        <p>In <b>Member Rankings</b>, set the number next to <b>Export Top
+        Members</b> and click it. It downloads a plain <b>.txt</b> file
+        numbering the top members by score, ready to paste into Discord.</p>
+        <p>It always ranks the whole kingdom for the selected week &ndash;
+        any search or alliance/tier/status filter on the table is ignored,
+        so the list is never accidentally narrowed.</p>
+
+        <h3>Something looks wrong</h3>
+        <p>Click any member&rsquo;s row. It opens their full scorecard &ndash;
+        every stat, what it scored, and their week-by-week history &ndash; which
+        usually explains the number straight away.</p>
+      </div>
+    </div>
+  </details>
+
+  <details class="tool" id="dataTool">
+    <summary>Weekly spreadsheets</summary>
+    <div class="toolbody">
+      <div class="drop" id="drop">
+        <button class="primary" id="pickBtn">Choose .xlsx files</button>
+        <p>or drag them here &mdash; add one export per week, in any order</p>
+        <input type="file" id="picker" accept=".xlsx" multiple hidden>
+      </div>
+      <div class="weeklist" id="weekList"></div>
+      <div class="chipbar">
+        <button id="backupBtn">Download backup</button>
+        <button id="restoreBtn">Restore backup</button>
+        <input type="file" id="restorePicker" accept=".json,application/json" hidden>
+        <span class="meta" id="storeMode"></span>
+      </div>
+    </div>
+  </details>
+
+  <details class="tool" id="cfgTool">
+    <summary>Scoring weights</summary>
+    <div class="toolbody">
+      <p class="note" style="margin:0">Set anything to 0 to drop it from the score.
+        The percentages show each stat's real share once the numbers are normalised.
+        Changes save for everyone.</p>
+      <div class="wgrid" id="weights"></div>
+      <div class="wgrid" id="thresholds"></div>
+      <div class="chipbar">
+        <button id="resetCfg">Reset to defaults</button>
+      </div>
+    </div>
+  </details>
+
+  <div class="chipbar" id="weekTabs"></div>
+
+  <div id="app"></div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+/*__APP__*/
+
+/* ============================================================
+   Application state, persistence and rendering
+   ============================================================ */
+
+const DEFAULT_CONFIG = /*__CONFIG__*/;
+// Weeks baked in at build time, so the page is useful the moment it opens.
+// Anything saved through the page takes over from these.
+const SEED = /*__SEED__*/;
+
+let STATE = { version: 1, config: structuredClone(DEFAULT_CONFIG), weeks: [] };
+let VIEW = { weekIndex: -1, alliance: "", tier: "", flag: "", q: "",
+             sortKey: "r", sortAsc: true, topX: 25 };
+let SCORED = [];
+let READONLY = false;
+let api = null;
+let saveTimer = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const cls = s => String(s).replace(/[^A-Za-z0-9]+/g, "-");
+const fmt = n => {
+  n = Number(n) || 0;
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return String(Math.round(n));
+};
+const delta = v => v == null ? '<span class="flat">&ndash;</span>'
+  : v > 0 ? '<span class="up">+' + (typeof v === "number" && v % 1 ? v.toFixed(1) : v) + "</span>"
+  : v < 0 ? '<span class="down">' + (typeof v === "number" && v % 1 ? v.toFixed(1) : v) + "</span>"
+  : '<span class="flat">0</span>';
+
+function setStatus(text, kind) {
+  const el = $("saveStatus");
+  if (el) { el.textContent = text; el.className = "status " + (kind || ""); }
+}
+
+/* ---------- storage ------------------------------------------------------
+   Members are stored columnar rather than as objects: the same week is about
+   a third of the size, which matters once a season of weeks has piled up. */
+const PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
+  "home_kingdom", "city_hall", "power", "kill_score", "kills", "tech_donations",
+  "building_time_s", "times_helped", "resources_donated", "forts_destroyed",
+  "armory_points", "last_login", "days_inactive", "days_in_alliance"];
+
+const packWeek = w => ({
+  id: w.id, label: w.label, scanDate: w.scanDate, summaries: w.summaries,
+  file: w.file || null,   // the original .xlsx, archived verbatim
+  cols: PACK_FIELDS, rows: w.members.map(m => PACK_FIELDS.map(f => m[f] ?? null)),
+});
+const unpackWeek = w => {
+  if (!w.rows) return w;
+  const cols = w.cols || PACK_FIELDS;
+  return {
+    id: w.id, label: w.label, scanDate: w.scanDate, summaries: w.summaries || [],
+    file: w.file || null,
+    members: w.rows.map(r => Object.fromEntries(cols.map((c, i) => [c, r[i]]))),
+  };
+};
+
+/* ---------- where the data lives -----------------------------------------
+   Three homes, picked in this order:
+     artifact - published on claude.ai; saves for every viewer
+     server   - self-hosted beside the small API in server.py; saves for all
+     local    - no backend at all, so state stays in this one browser
+*/
+const Store = {
+  mode: "none", api: null, preloaded: null,
+
+  async detect() {
+    if (typeof claude !== "undefined" && claude.use) {
+      try { this.api = await claude.use("artifact"); } catch (e) { this.api = null; }
+      if (this.api) { this.mode = "artifact"; return; }
+    }
+    try {
+      const res = await fetch("api/state", { cache: "no-store" });
+      if (res.ok) { this.preloaded = await res.json(); this.mode = "server"; return; }
+    } catch (e) { /* no backend here */ }
+    this.mode = typeof localStorage !== "undefined" ? "local" : "none";
+  },
+
+  async read() {
+    if (this.mode === "server") return this.preloaded;
+    if (this.mode === "local") {
+      try { return JSON.parse(localStorage.getItem("rok-warroom") || "null"); }
+      catch (e) { return null; }
+    }
+    if (this.mode === "artifact") {
+      try {
+        const res = await fetch("data/state.json", { cache: "no-store" });
+        if (res.ok) return await res.json();
+      } catch (e) { /* nothing published yet */ }
+    }
+    return null;
+  },
+
+  async write(payload) {
+    if (this.mode === "artifact") return this.api.publish({ "data/state.json": payload });
+    if (this.mode === "server") {
+      const res = await fetch("api/state", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: payload });
+      if (!res.ok) throw { code: "upstream_error", message: "the server returned " + res.status };
+      return;
+    }
+    if (this.mode === "local") { localStorage.setItem("rok-warroom", payload); return; }
+    throw { code: "unavailable", message: "there is nowhere to save from this page" };
+  },
+};
+
+/* Merge saved settings onto the current defaults.
+
+   Only the things a person actually edits are carried over: the weights and
+   the flag thresholds. Everything else - which stats are running totals, the
+   curve, the tier cuts - describes how the game reports data, so it always
+   comes from this build. Otherwise a config saved months ago would quietly
+   override a corrected default, and a weight that no longer exists would
+   linger in the panel forever. */
+function mergeConfig(saved) {
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  if (!saved) return cfg;
+  for (const k of Object.keys(cfg.weights))
+    if (Number.isFinite(+saved.weights?.[k])) cfg.weights[k] = +saved.weights[k];
+  for (const k of Object.keys(cfg.flags))
+    if (Number.isFinite(+saved.flags?.[k])) cfg.flags[k] = +saved.flags[k];
+  return cfg;
+}
+
+async function load() {
+  const raw = await Store.read();
+  if (raw && raw.weeks) {
+    STATE = {
+      version: raw.version || 1,
+      config: mergeConfig(raw.config),
+      weeks: raw.weeks.map(unpackWeek),
+    };
+  }
+  if (!STATE.weeks.length && SEED && SEED.length) STATE.weeks = SEED.map(unpackWeek);
+}
+
+function queueSave() {
+  if (READONLY || Store.mode === "none") return;
+  clearTimeout(saveTimer);
+  setStatus("unsaved", "busy");
+  saveTimer = setTimeout(save, 1200);   // batch edits into one write
+}
+
+async function save() {
+  if (READONLY || Store.mode === "none") return;
+  clearTimeout(saveTimer);
+  setStatus("saving…", "busy");
+  const payload = JSON.stringify({
+    version: 1, config: STATE.config, weeks: STATE.weeks.map(packWeek),
+  });
+  try {
+    await Store.write(payload);
+    setStatus(Store.mode === "local" ? "saved (this browser)" : "saved", "ok");
+  } catch (err) {
+    const code = err && err.code;
+    if (["not_writer", "not_granted", "not_declared", "capability_disabled",
+         "capability_removed", "consent_required"].includes(code)) {
+      goReadOnly("You have view-only access, so changes will not be saved for others.", true);
+    } else if (code === "conflict") {
+      setStatus("someone else saved first – reloading", "busy");
+    } else if (code === "too_large") {
+      setStatus("too much data to save", "err");
+      notice("The saved data is too large. Remove an older week and try again.", true);
+    } else if (code === "rate_limited") {
+      setStatus("saving too often – retrying", "busy");
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(save, 8000);
+    } else {
+      setStatus("save failed", "err");
+      notice("Could not save: " + (err && err.message ? err.message : code || "unknown error"), true);
+    }
+  }
+}
+
+function goReadOnly(message, hide) {
+  READONLY = true;
+  setStatus(hide ? "view only" : "not saving", "");
+  if (hide) {
+    $("dataTool").open = false;
+    $("cfgTool").open = false;
+    $("dataTool").style.display = "none";
+    $("cfgTool").style.display = "none";
+  }
+  if (message) notice(message, false);
+}
+
+function notice(text, bad) {
+  $("notice").innerHTML =
+    '<div class="banner' + (bad ? " bad" : "") + '">' + esc(text) + "</div>";
+}
+
+/* ---------- weeks --------------------------------------------------------- */
+
+function sortWeeks() {
+  STATE.weeks.sort((a, b) =>
+    String(a.scanDate || a.label).localeCompare(String(b.scanDate || b.label)));
+}
+
+function recompute() {
+  sortWeeks();
+  SCORED = STATE.weeks.length ? scoreAll(STATE.weeks, STATE.config).results : [];
+  if (VIEW.weekIndex < 0 || VIEW.weekIndex >= SCORED.length)
+    VIEW.weekIndex = SCORED.length - 1;
+}
+
+function bytesToB64(buf) {
+  const u8 = new Uint8Array(buf);
+  let s = "";
+  for (let i = 0; i < u8.length; i += 0x8000)   // chunked, or the arg list
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));  // blows the stack
+  return btoa(s);
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+async function addFiles(files) {
+  const list = [...files].filter(f => f.name.toLowerCase().endsWith(".xlsx"));
+  if (!list.length) return notice("Those are not .xlsx files.", true);
+  setStatus("reading…", "busy");
+  let added = 0, failed = [];
+  for (const file of list) {
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = await parseMembers(buf);
+      const label = file.name.replace(/\.xlsx$/i, "").slice(0, 60);
+      const scan = parsed.scanDate;
+      // Same scan date means the same week re-exported - replace it.
+      const existing = STATE.weeks.findIndex(w => w.scanDate && scan &&
+        w.scanDate.slice(0, 10) === scan.slice(0, 10));
+      const week = {
+        id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
+        label: existing >= 0 ? STATE.weeks[existing].label : label,
+        scanDate: scan, members: parsed.members, summaries: parsed.summaries,
+        // Archived as uploaded, so a week can be rebuilt or handed back later.
+        file: { name: file.name, b64: bytesToB64(buf) },
+      };
+      if (existing >= 0) STATE.weeks[existing] = week; else STATE.weeks.push(week);
+      added++;
+    } catch (e) {
+      failed.push(file.name + " - " + e.message);
+    }
+  }
+  recompute();
+  VIEW.weekIndex = SCORED.length - 1;
+  render();
+  if (failed.length) notice("Could not read: " + failed.join("; "), true);
+  else if (added) notice(added + (added === 1 ? " week added." : " weeks added.") +
+    " Rename any week below so the labels read the way you want.", false);
+  queueSave();
+}
+
+function removeWeek(id) {
+  const w = STATE.weeks.find(x => x.id === id);
+  if (!w || !confirm('Remove "' + w.label + '" and its rankings?')) return;
+  STATE.weeks = STATE.weeks.filter(x => x.id !== id);
+  recompute();
+  render();
+  queueSave();
+}
+
+/* ---------- rendering ----------------------------------------------------- */
+
+function renderWeekList() {
+  const el = $("weekList");
+  if (!STATE.weeks.length) {
+    el.innerHTML = '<p class="note" style="margin:0">No weeks yet. Add an export above.</p>';
+    return;
+  }
+  el.innerHTML = STATE.weeks.map(w => `
+    <div class="weekrow" data-id="${esc(w.id)}">
+      <input value="${esc(w.label)}" aria-label="Week name" data-id="${esc(w.id)}">
+      <span class="meta">${w.members.length} members${
+        w.scanDate ? " &middot; scan " + esc(w.scanDate.slice(0, 10)) : ""}${
+        w.file ? " &middot; sheet saved" : ""}</span>
+      ${w.file && Store.mode !== "artifact"
+        ? `<button data-xlsx="${esc(w.id)}">.xlsx</button>` : ""}
+      <button class="danger" data-del="${esc(w.id)}">Remove</button>
+    </div>`).join("");
+  el.querySelectorAll("input").forEach(inp => {
+    inp.onchange = () => {
+      const w = STATE.weeks.find(x => x.id === inp.dataset.id);
+      if (w) { w.label = inp.value.trim() || w.label; recompute(); render(); queueSave(); }
+    };
+  });
+  el.querySelectorAll("button[data-del]").forEach(b => {
+    b.onclick = () => removeWeek(b.dataset.del);
+  });
+  el.querySelectorAll("button[data-xlsx]").forEach(b => {
+    b.onclick = () => {
+      const w = STATE.weeks.find(x => x.id === b.dataset.xlsx);
+      if (w && w.file) downloadBytes(b64ToBytes(w.file.b64), w.file.name,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    };
+  });
+}
+
+function renderConfig() {
+  const w = STATE.config.weights;
+  const total = Object.values(w).reduce((a, b) => a + (+b || 0), 0) || 1;
+  $("weights").innerHTML = Object.keys(w).map(k => `
+    <div class="wfield">
+      <label for="w_${k}">${esc(METRIC_LABELS[k] || k)}</label>
+      <input id="w_${k}" type="number" min="0" step="1" value="${+w[k] || 0}" data-w="${k}">
+      <span class="pct">${(+w[k] > 0 ? (w[k] / total * 100).toFixed(0) : "0")}%</span>
+    </div>`).join("");
+  $("weights").querySelectorAll("input").forEach(inp => {
+    inp.onchange = () => {
+      STATE.config.weights[inp.dataset.w] = Math.max(0, +inp.value || 0);
+      recompute(); render(); queueSave();
+    };
+  });
+
+  const t = [
+    ["inactive_days", "Inactive after (days)", STATE.config.flags.inactive_days],
+    ["dead_days", "Kick candidate (days)", STATE.config.flags.dead_days],
+    ["low_score", "Low activity below", STATE.config.flags.low_score],
+  ];
+  $("thresholds").innerHTML = t.map(([k, label, v]) => `
+    <div class="wfield">
+      <label for="t_${k}">${esc(label)}</label>
+      <input id="t_${k}" type="number" min="0" step="1" value="${v}" data-t="${k}">
+    </div>`).join("");
+  $("thresholds").querySelectorAll("input").forEach(inp => {
+    inp.onchange = () => {
+      STATE.config.flags[inp.dataset.t] = Math.max(0, +inp.value || 0);
+      recompute(); render(); queueSave();
+    };
+  });
+}
+
+function renderTabs() {
+  $("weekTabs").innerHTML =
+    SCORED.map((r, i) => `<span class="chip ${i === VIEW.weekIndex ? "on" : ""}"
+      tabindex="0" data-week="${i}">${esc(r.label)}</span>`).join(" ") +
+    '<span class="status" id="saveStatus">' + (READONLY ? "view only" : "ready") + "</span>";
+  $("weekTabs").querySelectorAll("[data-week]").forEach(c => {
+    const go = () => { VIEW.weekIndex = +c.dataset.week; render(); };
+    c.onclick = go;
+    c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+  });
+}
+
+/* Which stat columns to show. Driven by the weights a person set, not by
+   whether the stat could be scored this week: a running total with no previous
+   week to compare against scores nothing, but its column should still be
+   there reading 0, so it is obvious why. */
+const METRIC_ORDER = ["kill_score", "tech_donations", "times_helped",
+  "armory_points", "forts_destroyed", "building_time_s", "resources_donated",
+  "kills"];
+const shownMetrics = r => METRIC_ORDER.filter(k =>
+  (+STATE.config.weights[k] || 0) > 0 || r.metrics.includes(k));
+
+const sevOf = m => m.flags.includes("DEAD") ? "sev-crit"
+  : m.flags.includes("INACTIVE") ? "sev-warn"
+  : m.flags.includes("LOW") ? "sev-low" : "";
+
+/* The table is sized by its content, then any width the panel has left over
+   is shared out equally as extra padding on every column - so the columns
+   breathe evenly instead of one of them swallowing the lot. */
+function spreadColumns() {
+  const tbl = document.getElementById("memberTable");
+  if (!tbl) return;
+  const box = tbl.closest(".scroll");
+  if (!box) return;
+  tbl.style.setProperty("--spread", "0px");
+  const cols = tbl.querySelectorAll("thead th").length;
+  if (!cols) return;
+  const spare = box.clientWidth - tbl.getBoundingClientRect().width;
+  if (spare > 1) tbl.style.setProperty("--spread", (spare / (cols * 2)) + "px");
+}
+
+function render() {
+  renderWeekList();
+  renderConfig();
+  renderTabs();
+
+  const r = SCORED[VIEW.weekIndex];
+  const app = $("app");
+  if (!r) {
+    app.innerHTML = '<div class="panel"><div class="empty">' +
+      "<h2>No data yet</h2><p>Add a weekly .xlsx export above to build the rankings.</p>" +
+      "</div></div>";
+    $("subtitle").textContent = "no weeks loaded";
+    $("footer").textContent = "";
+    return;
+  }
+
+  const prev = VIEW.weekIndex > 0 ? SCORED[VIEW.weekIndex - 1] : null;
+  const left = departures(r, prev);
+  const isDelta = k => r.metricModes[k] === "delta";
+  const ms = r.members;
+
+  $("subtitle").innerHTML = esc(r.label) +
+    (r.scanDate ? " &middot; scan " + esc(r.scanDate.slice(0, 10)) : "") + "<br>" +
+    ms.length + " members &middot; " + r.alliances.length + " alliances" +
+    (r.hasPrevious ? " &middot; vs " + esc(r.previousLabel) : "");
+
+  const avg = ms.reduce((a, m) => a + m.score, 0) / ms.length;
+  const med = ms.map(m => m.score).sort((a, b) => a - b)[Math.floor(ms.length / 2)];
+  const inactive = ms.filter(m => m.flags.includes("INACTIVE") || m.flags.includes("DEAD")).length;
+  const dead = ms.filter(m => m.flags.includes("DEAD")).length;
+  const top = ms.find(m => m.rank_overall === 1) || ms[0];
+  const tc = r.tierCounts;
+
+  const cards = [
+    ["Members ranked", ms.length, r.alliances.map(a => a.tag + " " + a.members).join("  ")],
+    ["Average score", avg.toFixed(1), "median " + med.toFixed(1)],
+    ["Top performer", esc(top.name), esc(top.alliance_tag) + " &middot; " + top.score.toFixed(1) + " pts"],
+    ["S / A tier", (tc.S || 0) + " / " + (tc.A || 0), "carrying the kingdom"],
+    ["Needs action", inactive, dead + " over " + STATE.config.flags.dead_days + " days idle"],
+  ];
+
+  const metricHead = r.metrics.map(k =>
+    `<th class="num">${esc(METRIC_LABELS[k] || k)}</th>`).join("");
+
+  const allianceRows = r.alliances.map(a => `<tr>
+    <td class="num">${a.rank}</td><td><b>${esc(a.tag)}</b></td><td>${esc(a.name)}</td>
+    <td class="num">${a.members}</td><td class="num"><b>${a.avg_score.toFixed(1)}</b></td>
+    <td class="num">${a.median_score.toFixed(1)}</td>
+    <td class="num">${a.avg_change == null ? '<span class="flat">&ndash;</span>' : delta(a.avg_change)}</td>
+    <td class="num">${a.top_tier}</td><td class="num">${a.inactive}</td>
+    <td class="num">${fmt(a.total_power)}</td>
+    ${r.metrics.map(k => `<td class="num">${fmt(a.totals[k])}</td>`).join("")}</tr>`).join("");
+
+  // Table headings are abbreviated: the header text, not the numbers, is what
+  // makes these columns wide. Full names stay in the scorecard and the FAQ.
+  const SHORT = {
+    kill_score: "Kill", kills: "Kills", tech_donations: "Tech",
+    times_helped: "Helps", armory_points: "Armory", forts_destroyed: "Forts",
+    building_time_s: "Build", resources_donated: "Res", power_growth: "Power +",
+  };
+  const COLS = [
+    { k: "rank_overall", t: "#", n: 1, f: m => m.rank_overall },
+    { k: "name", t: "Governor", n: 0,
+      f: m => `<span class="nm">${esc(m.name)}</span>` +
+        (m.title ? `<br><span class="sub2">${esc(m.title)}</span>` : "") },
+    { k: "alliance_tag", t: "Ally", n: 0, f: m => esc(m.alliance_tag) },
+    { k: "rank", t: "Rk", n: 0, f: m => esc(m.rank || "") },
+    { k: "score", t: "Score", n: 1, f: m =>
+        `<div class="bar"><i style="width:${m.score}%"></i><b>${m.score.toFixed(1)}</b></div>` },
+    { k: "tier", t: "Tier", n: 0, f: m => `<span class="tier ${m.tier}">${m.tier}</span>` },
+    // Both are empty until a second week exists, so they only appear then.
+    ...(r.hasPrevious ? [
+      { k: "score_change", t: "+/-", n: 1, f: m => delta(m.score_change) },
+      { k: "rank_change", t: "Move", n: 1, f: m => delta(m.rank_change) },
+    ] : []),
+    { k: "rank_in_alliance", t: "In ally", n: 1, f: m => m.rank_in_alliance },
+    { k: "power", t: "Power", n: 1, f: m => fmt(m.power) },
+    { k: "power_growth", t: "Power +", n: 1, f: m => fmt(m.power_growth || 0) },
+    { k: "city_hall", t: "CH", n: 1, f: m => m.city_hall || "" },
+    { k: "days_inactive", t: "Status", n: 0, cls: "status", f: m =>
+        m.flags.map(x => `<span class="flag ${cls(x)}">${esc(x)}</span>`).join("") +
+        (m.days_inactive > 0
+          ? `<span class="sub2">${m.days_inactive}d idle</span>` : "") },
+  ].concat(shownMetrics(r).flatMap(k => {
+    // Kill score is a running total, so the total and the weekly gain get a
+    // column each - side by side, never mixed into one cell.
+    const total = {
+      k: isDelta(k) ? "total_" + k : "eff_" + k,
+      t: SHORT[k] || METRIC_LABELS[k] || k, n: 1,
+      f: m => fmt(isDelta(k) ? m["total_" + k] : m["eff_" + k]),
+    };
+    if (k !== "kill_score") return [total];
+    return [total, {
+      k: "kill_growth", t: "Kill +", n: 1,
+      f: m => fmt(r.metricModes.kill_score === "delta" ? (m.eff_kill_score || 0) : 0),
+    }];
+  }));
+
+  const rows = ms.filter(m =>
+    (!VIEW.alliance || m.alliance_tag === VIEW.alliance) &&
+    (!VIEW.tier || m.tier === VIEW.tier) &&
+    (!VIEW.flag || m.flags.includes(VIEW.flag)) &&
+    (!VIEW.q || m.name.toLowerCase().includes(VIEW.q) || String(m.governor_id).includes(VIEW.q))
+  ).sort((a, b) => {
+    const x = a[VIEW.sortKey], y = b[VIEW.sortKey];
+    const c = (typeof x === "string" || typeof y === "string")
+      ? String(x ?? "").localeCompare(String(y ?? "")) : (Number(x ?? 0) - Number(y ?? 0));
+    return VIEW.sortAsc ? c : -c;
+  });
+
+  const priority = { DEAD: 0, INACTIVE: 1, "NO SUPPORT": 2, LOW: 3 };
+  const actionRows = ms.filter(m => m.flags.some(f => f in priority))
+    .sort((a, b) => Math.min(...a.flags.map(f => priority[f] ?? 9)) -
+                    Math.min(...b.flags.map(f => priority[f] ?? 9)) || a.score - b.score)
+    .map(m => `<tr class="expander ${sevOf(m)}" data-id="${m.governor_id}">
+      <td>${esc(m.alliance_tag)}</td><td>${esc(m.name)}</td>
+      <td class="num">${m.score.toFixed(1)}</td><td><span class="tier ${m.tier}">${m.tier}</span></td>
+      <td class="num">${m.days_inactive}</td><td class="num">${fmt(m.power)}</td>
+      <td>${m.flags.map(x => `<span class="flag ${cls(x)}">${esc(x)}</span>`).join("")}</td></tr>`).join("");
+
+  const depRows = left.map(d => `<tr><td>${esc(d.alliance_tag)}</td><td>${esc(d.name)}</td>
+    <td class="num">${fmt(d.power)}</td>
+    <td class="num">${d.last_score == null ? "&ndash;" : d.last_score.toFixed(1)}</td>
+    <td>${d.last_tier ? `<span class="tier ${d.last_tier}">${d.last_tier}</span>` : ""}</td></tr>`).join("");
+
+  const wTotal = r.metrics.reduce((a, k) => a + (+STATE.config.weights[k] || 0), 0) || 1;
+
+  app.innerHTML = `
+    ${!r.hasPrevious ? '<div class="banner"><b>Only one week loaded.</b> Add an earlier ' +
+      'or later export and week-over-week gains, rank movement and departures switch on ' +
+      "automatically.</div>" : ""}
+
+    <section><h2>This Week</h2><div class="cards">${cards.map(c =>
+      `<div class="card"><span class="k">${c[0]}</span><span class="v">${c[1]}</span>
+       <span class="n">${c[2]}</span></div>`).join("")}</div></section>
+
+    <section><h2>Alliance Standings</h2><div class="panel"><div class="scroll"><table>
+      <thead><tr><th>#</th><th>Tag</th><th>Alliance</th><th class="num">Members</th>
+      <th class="num">Avg</th><th class="num">Median</th><th class="num">vs last</th>
+      <th class="num">S+A</th><th class="num">Idle</th><th class="num">Power</th>
+      ${metricHead}</tr></thead><tbody>${allianceRows}</tbody></table></div></div></section>
+
+    <section><h2>Member Rankings</h2>
+      <div class="controls">
+        <input type="search" id="q" placeholder="Search name or governor ID"
+               value="${esc(VIEW.q)}" aria-label="Search members">
+        <span class="chipbar" id="allyChips">
+          <span class="chip ${VIEW.alliance ? "" : "on"}" tabindex="0" data-ally="">All</span>
+          ${r.alliances.map(a => `<span class="chip ${VIEW.alliance === a.tag ? "on" : ""}"
+            tabindex="0" data-ally="${esc(a.tag)}">${esc(a.tag)}</span>`).join("")}
+        </span>
+        <select id="tierSel" aria-label="Filter by tier">
+          <option value="">All tiers</option>
+          ${TIER_ORDER.map(t => `<option value="${t}" ${VIEW.tier === t ? "selected" : ""}
+            >${t} tier</option>`).join("")}
+        </select>
+        <select id="flagSel" aria-label="Filter by status">
+          ${[["", "All members"], ["DEAD", "Kick candidates"], ["INACTIVE", "Inactive"],
+             ["LOW", "Low activity"], ["NO SUPPORT", "No support given"],
+             ["NO BASELINE", "No baseline"]].map(([v, l]) =>
+            `<option value="${v}" ${VIEW.flag === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <span class="topx">
+          <label for="topXInput">Top</label>
+          <input type="number" id="topXInput" min="1" max="${ms.length}" step="1"
+                 value="${VIEW.topX}" aria-label="Number of top members to export">
+          <button id="topXBtn" class="primary">Export Top Members</button>
+        </span>
+        <span class="count">${rows.length} shown</span>
+      </div>
+      <div class="panel"><div class="scroll"><table id="memberTable">
+        <thead><tr>${COLS.map(c => `<th data-k="${c.k}" class="${c.n ? "num" : ""} ${
+          c.k === VIEW.sortKey ? "sorted " + (VIEW.sortAsc ? "asc" : "") : ""}">${esc(c.t)}</th>`)
+          .join("")}</tr></thead>
+        <tbody>${rows.map(m => `<tr class="expander ${sevOf(m)}" data-id="${m.governor_id}">${
+          COLS.map(c => `<td class="${c.n ? "num" : ""} ${c.cls || ""}">${c.f(m)}</td>`)
+          .join("")}</tr>`).join("")}
+        </tbody></table></div></div>
+      <p class="note">Click any row for the full scorecard and week-by-week history.</p>
+    </section>
+
+    <div class="split">
+      <section><h2>Action List</h2><div class="panel"><div class="scroll" style="max-height:430px">
+        <table id="actionTable"><thead><tr><th>Ally</th><th>Governor</th><th class="num">Score</th><th>Tier</th>
+        <th class="num">Idle</th><th class="num">Power</th><th>Why</th></tr></thead>
+        <tbody>${actionRows || '<tr><td colspan="7">Nothing flagged &ndash; clean week.</td></tr>'}
+        </tbody></table></div>
+        <p class="note" style="padding:0 12px 10px">Click a row for their full
+        scorecard.</p></div></section>
+      <section><h2>Departures (${left.length})</h2>
+        <div class="panel"><div class="scroll" style="max-height:430px">
+        <table><thead><tr><th>Was in</th><th>Governor</th><th class="num">Power</th>
+        <th class="num">Last score</th><th>Tier</th></tr></thead>
+        <tbody>${depRows || '<tr><td colspan="5">' + (r.hasPrevious ?
+          "Nobody left since last week." : "Tracked once a second week is loaded.") +
+          "</td></tr>"}</tbody></table></div></div></section>
+    </div>
+
+    <section><h2>How The Score Works</h2><div class="panel" style="padding:17px 19px">
+      <div class="grid2">
+        <div><b>Weighting</b>${r.metrics.map(k => `
+          <div class="mrow"><span class="lbl">${esc(METRIC_LABELS[k] || k)}</span>
+          <span class="mini"><i style="width:${STATE.config.weights[k] / wTotal * 100}%"></i></span>
+          <span class="val">${(STATE.config.weights[k] / wTotal * 100).toFixed(0)}%</span></div>`).join("")}
+        </div>
+        <div><b>Method</b><div class="note" style="font-size:13px;color:var(--dim);margin-top:5px">
+          ${(() => {
+            const idle = shownMetrics(r).filter(k => !r.metrics.includes(k));
+            if (!idle.length) return "";
+            const names = idle.map(k => METRIC_LABELS[k] || k).join(" and ");
+            return `<b>${names}</b> ${idle.length > 1 ? "are" : "is"} not counted this
+              week: ${idle.length > 1 ? "they are" : "it is"} a running total, and there
+              is no earlier week to measure the gain against.
+              ${idle.length > 1 ? "Their" : "Its"} weight is shared out across the other
+              stats until a second week is added. `;
+          })()}
+          ${r.usesDelta ? "A <b>+</b> column is what that stat scores on: the gain since " +
+            "last week, not the running total beside it. Someone who added 20M kill " +
+            "points outranks someone sitting on 100M who added 10M. " : ""}
+          Each stat becomes a 0&ndash;100 score on the <b>${esc(STATE.config.scoring.curve)}</b>
+          curve, measured against everyone in the kingdom, combined using the weights at
+          left, then multiplied by an inactivity factor. Tiers are cut by percentile:
+          S is the top 10%, F the bottom 10%.
+        </div></div>
+      </div></div></section>`;
+
+  // events for the freshly rendered markup
+  const q = $("q");
+  q.oninput = () => {
+    VIEW.q = q.value.trim().toLowerCase();
+    const pos = q.selectionStart; render();
+    const nq = $("q"); nq.focus(); nq.setSelectionRange(pos, pos);
+  };
+  $("tierSel").onchange = e => { VIEW.tier = e.target.value; render(); };
+  $("flagSel").onchange = e => { VIEW.flag = e.target.value; render(); };
+  $("topXInput").onchange = e => {
+    VIEW.topX = Math.max(1, Math.min(ms.length, Math.round(+e.target.value) || VIEW.topX));
+    e.target.value = VIEW.topX;
+  };
+  $("topXBtn").onclick = exportTopX;
+  $("allyChips").querySelectorAll("[data-ally]").forEach(c => {
+    const go = () => { VIEW.alliance = c.dataset.ally; render(); };
+    c.onclick = go;
+    c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+  });
+  document.querySelectorAll("#memberTable th").forEach(th => th.onclick = () => {
+    const k = th.dataset.k;
+    if (k === VIEW.sortKey) VIEW.sortAsc = !VIEW.sortAsc;
+    else { VIEW.sortKey = k; VIEW.sortAsc = ["rank_overall", "name", "alliance_tag"].includes(k); }
+    render();
+  });
+  // The action list expands exactly like the rankings table does.
+  [["#memberTable", COLS.length], ["#actionTable", 7]].forEach(([sel, span]) => {
+    document.querySelectorAll(sel + " tr.expander").forEach(tr => tr.onclick = () => {
+      const next = tr.nextElementSibling;
+      if (next && next.classList.contains("detail")) { next.remove(); return; }
+      document.querySelectorAll("tr.detail").forEach(d => d.remove());
+      const m = ms.find(x => String(x.governor_id) === tr.dataset.id);
+      if (m) tr.insertAdjacentHTML("afterend", detailRow(m, r, span));
+    });
+  });
+
+  spreadColumns();
+
+  $("footer").textContent = STATE.weeks.length + " week(s) loaded: " +
+    SCORED.map(x => x.label).join(", ");
+}
+
+// the share-out depends on how wide the window is, so redo it on resize
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(spreadColumns, 120);
+});
+
+function detailRow(m, r, span) {
+  const isDelta = k => r.metricModes[k] === "delta";
+  const cats = Object.entries(m.categories).map(([k, v]) =>
+    `<div class="mrow"><span class="lbl">${esc(k)}</span>
+     <span class="mini"><i style="width:${v}%"></i></span>
+     <span class="val">${v.toFixed(1)}</span></div>`).join("");
+  const mets = shownMetrics(r).map(k => {
+    const scored = m["score_" + k] || 0;
+    return `<div class="mrow"><span class="lbl">${esc(METRIC_LABELS[k] || k)}</span>
+     <span class="mini"><i style="width:${scored}%"></i></span>
+     <span class="val">${fmt(m["eff_" + k] || 0)}${isDelta(k) ?
+       ` <span class="flat">/${fmt(m["total_" + k])}</span>` : ""}</span></div>`;
+  }).join("");
+  const hist = SCORED.map(w => {
+    const him = w.members.find(x => x.governor_id === m.governor_id);
+    return him ? `<div class="mrow"><span class="lbl">${esc(w.label)}</span>
+      <span class="mini"><i style="width:${him.score}%"></i></span>
+      <span class="val">${him.score.toFixed(1)}
+      <span class="tier ${him.tier}" style="min-width:15px">${him.tier}</span></span></div>` : "";
+  }).join("");
+  return `<tr class="detail"><td colspan="${span}"><div class="grid2">
+    <div><b>Category scores</b>${cats}</div>
+    <div><b>Metric detail</b>${mets}</div>
+    <div><b>Week history</b>${SCORED.length > 1 ? hist :
+      '<div class="note">Only one week loaded so far.</div>'}
+      <div class="note" style="margin-top:11px">Governor ID ${m.governor_id} &middot;
+        power ${fmt(m.power)}${m.power_growth ? " (+" + fmt(m.power_growth) + ")" : ""} &middot;
+        CH ${m.city_hall || "?"}<br>idle ${m.days_inactive} d &middot;
+        overall #${m.rank_overall}, #${m.rank_in_alliance} in ${esc(m.alliance_tag)}</div>
+    </div></div></td></tr>`;
+}
+
+/* ---------- getting data back out ---------------------------------------
+   A normal browser can be handed a file directly. Inside the claude.ai
+   viewer that is blocked, and its download capability does not allow
+   .xlsx at all - so there the backup .json (which carries the archived
+   sheets inside it) is the way out. */
+function downloadBytes(bytes, filename, mime) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime || "application/octet-stream" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function downloadBackup() {
+  const payload = JSON.stringify({
+    version: 1, config: STATE.config, weeks: STATE.weeks.map(packWeek),
+  });
+  const name = "warroom-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  if (Store.mode === "artifact") {
+    const dl = typeof claude !== "undefined" && claude.use ? await claude.use("downloads") : null;
+    if (!dl) return notice("Downloads are not available in this view.", true);
+    try { await dl.save({ filename: name, data: payload }); }
+    catch (e) {
+      if (e && e.code !== "declined")
+        notice("Could not download: " + (e.message || e.code), true);
+    }
+    return;
+  }
+  downloadBytes(new TextEncoder().encode(payload), name, "application/json");
+}
+
+async function exportTopX() {
+  const r = SCORED[VIEW.weekIndex];
+  if (!r || !r.members.length) return;
+  const input = $("topXInput");
+  const n = Math.max(1, Math.min(r.members.length, Math.round(+input.value) || VIEW.topX));
+  VIEW.topX = n; input.value = n;
+  // r.members is already ranked kingdom-wide by score (rank_overall order),
+  // so this ignores whatever search/alliance/tier filter is on the table.
+  const lines = ["Top " + n + " Users:"];
+  r.members.slice(0, n).forEach((m, i) => lines.push((i + 1) + ". " + m.name));
+  const text = lines.join("\n") + "\n";
+  const name = "top-" + n + "-" + cls(r.label).toLowerCase() + ".txt";
+  if (Store.mode === "artifact") {
+    const dl = typeof claude !== "undefined" && claude.use ? await claude.use("downloads") : null;
+    if (!dl) return notice("Downloads are not available in this view.", true);
+    try { await dl.save({ filename: name, data: text }); }
+    catch (e) {
+      if (e && e.code !== "declined")
+        notice("Could not download: " + (e.message || e.code), true);
+    }
+    return;
+  }
+  downloadBytes(new TextEncoder().encode(text), name, "text/plain");
+}
+
+async function restoreBackup(file) {
+  try {
+    const raw = JSON.parse(await file.text());
+    if (!raw || !Array.isArray(raw.weeks)) throw new Error("not a war room backup");
+    STATE = {
+      version: raw.version || 1,
+      config: mergeConfig(raw.config),
+      weeks: raw.weeks.map(unpackWeek),
+    };
+    recompute(); render(); queueSave();
+    notice("Backup restored: " + STATE.weeks.length + " week(s).", false);
+  } catch (e) {
+    notice("That backup could not be read: " + e.message, true);
+  }
+}
+
+/* ---------- wiring -------------------------------------------------------- */
+
+$("pickBtn").onclick = () => $("picker").click();
+$("picker").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add("over");
+}));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove("over");
+}));
+drop.addEventListener("drop", e => { if (e.dataTransfer?.files) addFiles(e.dataTransfer.files); });
+$("backupBtn").onclick = downloadBackup;
+$("restoreBtn").onclick = () => $("restorePicker").click();
+$("restorePicker").onchange = e => {
+  if (e.target.files[0]) restoreBackup(e.target.files[0]);
+  e.target.value = "";
+};
+$("resetCfg").onclick = () => {
+  if (!confirm("Reset every weight and threshold to the defaults?")) return;
+  STATE.config = structuredClone(DEFAULT_CONFIG);
+  recompute(); render(); queueSave();
+};
+
+(async () => {
+  await Store.detect();
+  await load();
+  recompute();
+  render();
+  const where = {
+    artifact: "Shared with everyone who can edit this page.",
+    server: "Saving to this site's server, shared with everyone.",
+    local: "No server here, so weeks are saved in this browser only. " +
+           "Use Download backup to move them.",
+    none: "This page cannot save anything.",
+  }[Store.mode];
+  $("storeMode").textContent = where;
+  if (Store.mode === "none") goReadOnly(where, false);
+  if (!STATE.weeks.length) $("dataTool").open = true;
+})();
+</script>
