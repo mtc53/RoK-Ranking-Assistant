@@ -19,3 +19,11 @@ selfhost/*.pem
 __pycache__/
 *.pyc
 ~$*.xlsx
+
+# Kingdom member data - names, governor IDs, stats. Kept on this machine,
+# not published to the repository. The built pages count too: build.py bakes
+# every week in Alliance Activity into them as starting data, so committing
+# them would publish the roster just as surely as the spreadsheets do.
+Alliance Activity/
+output/
+selfhost/index.html
