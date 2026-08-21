@@ -1,13 +1,3 @@
-/* ============================================================
-   RoK alliance rankings - browser engine
-   Reads .xlsx in the browser and scores members. Mirrors the
-   Python scorer in rok_ranker/ exactly; keep the two in step.
-   ============================================================ */
-
-/* ---------- XLSX reading -------------------------------------------------
-   An .xlsx is a ZIP of XML. Rather than ship a megabyte of library, this
-   unzips with the browser's own DecompressionStream and parses with
-   DOMParser. */
 
 async function readZip(buffer) {
   const u8 = new Uint8Array(buffer);
@@ -53,7 +43,6 @@ async function readEntry(zip, name) {
 
 const xml = s => new DOMParser().parseFromString(s, "application/xml");
 
-/** "BC12" -> 54 (zero-based column index). */
 function colIndex(ref) {
   let n = 0;
   for (let i = 0; i < ref.length; i++) {
@@ -64,7 +53,6 @@ function colIndex(ref) {
   return n - 1;
 }
 
-/** Excel serial date -> JS Date (1900 system, with the 1900 leap-year bug). */
 function serialToDate(n) {
   return new Date(Math.round((n - 25569) * 86400000));
 }
@@ -141,8 +129,6 @@ function sheetRows(sheetXml, shared) {
   return out;
 }
 
-/* ---------- turning sheets into members ---------------------------------- */
-
 const HEADER_ALIASES = {
   governor_id: ["governor id", "governorid", "id", "player id", "lord id"],
   name: ["name", "governor name", "nickname", "player"],
@@ -210,7 +196,6 @@ function findHeader(rows, required, lookup) {
   return null;
 }
 
-/** Parse one workbook into {members, summaries, scanDate}. */
 export async function parseMembers(buffer) {
   const sheets = await parseWorkbook(buffer);
   const members = [];
@@ -218,7 +203,7 @@ export async function parseMembers(buffer) {
 
   for (const sheet of sheets) {
     if (!sheet.rows.length) continue;
-    // Member sheets are tested first: a summary sheet never has a Governor ID.
+
     let hit = findHeader(sheet.rows, ["governor_id", "power"], LOOKUP);
     if (!hit) {
       const s = findHeader(sheet.rows, ["alliance_name", "tag"], SUMMARY_LOOKUP);
@@ -257,7 +242,6 @@ export async function parseMembers(buffer) {
   if (!members.length)
     throw new Error("No member rows found - is this the alliance export?");
 
-  // One row per governor; the most recent scan wins.
   const best = new Map();
   for (const m of members) {
     const prior = best.get(m.governor_id);
@@ -273,8 +257,6 @@ export async function parseMembers(buffer) {
     scanDate: scanSerial ? serialToDate(scanSerial).toISOString() : null,
   };
 }
-
-/* ---------- scoring ------------------------------------------------------ */
 
 export const METRIC_LABELS = {
   kill_score: "Kills +", kills: "Kills", tech_donations: "Tech Donations",
@@ -378,8 +360,7 @@ export function scoreWeek(week, previous, cfg, modes) {
       const raw = +m[name] || 0;
       m["total_" + name] = raw;
       if (effModes[name] !== "delta") m["eff_" + name] = raw;
-      // Nothing to compare against yet: the gain is 0, NOT the running total.
-      // Scoring the total would rank veterans instead of this week's effort.
+
       else if (!hasPrevious) m["eff_" + name] = 0;
       else if (prior) m["eff_" + name] = Math.max(0, raw - (+prior[name] || 0));
       else m["eff_" + name] = null;
@@ -388,8 +369,6 @@ export function scoreWeek(week, previous, cfg, modes) {
   }
   const usesDelta = Object.values(effModes).includes("delta");
 
-  // No baseline means this week's increase is unknowable - give them the
-  // middle of the pack rather than flattering or punishing them.
   for (const name of ACTIVITY_FIELDS) {
     if (effModes[name] !== "delta") continue;
     const known = members.map(m => m["eff_" + name]).filter(v => v !== null).sort((a, b) => a - b);
@@ -412,7 +391,6 @@ export function scoreWeek(week, previous, cfg, modes) {
   metrics.sort((a, b) => b[1] - a[1]);
   const totalWeight = metrics.reduce((a, [, w]) => a + w, 0) || 1;
 
-  // Time in the alliance is deliberately ignored - only output counts.
   for (const m of members)
     for (const [name] of metrics) m["adj_" + name] = +m["eff_" + name] || 0;
 
@@ -558,3 +536,4 @@ export function departures(current, previous) {
     }))
     .sort((a, b) => b.power - a.power);
 }
+

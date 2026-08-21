@@ -63,12 +63,8 @@ LOGIN_TRIES = 10
 LOGIN_LOCKOUT = 15 * 60
 COOKIE = "warroom"
 
-# Guards state.json and uploads/ together: the only thing standing between
-# two R5s pressing save at the same moment.
 LOCK = threading.RLock()
 
-
-# ---------------------------------------------------------------- the state
 
 def read_state() -> dict:
     for path in (STATE, BACKUP):
@@ -108,8 +104,6 @@ def _snapshot(text: str, rev: int) -> None:
     try:
         BACKUPS.mkdir(exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        # The revision is in the name too, so two saves in one second are two
-        # backups rather than one overwriting the other.
         (BACKUPS / f"state-{stamp}-{rev:06d}.json").write_text(text, encoding="utf-8")
         for old in sorted(BACKUPS.glob("state-*.json"))[:-KEEP_BACKUPS]:
             old.unlink(missing_ok=True)
@@ -123,8 +117,6 @@ def valid_state(payload) -> bool:
         return False
     return all(isinstance(w, dict) for w in payload["weeks"])
 
-
-# -------------------------------------------------------------- the archive
 
 def safe_name(text: str) -> str:
     """A filename that cannot escape the uploads folder."""
@@ -173,8 +165,6 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
             wanted = f"{base}-{digest[:8]}.xlsx"
         stored = known.get(digest, wanted)
 
-        # A renamed week should get a matching filename, but never by
-        # trampling one another week is using.
         if stored != wanted and wanted not in taken and not (UPLOADS / wanted).is_file():
             try:
                 if (UPLOADS / stored).is_file():
@@ -188,7 +178,7 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
             UPLOADS.mkdir(exist_ok=True)
             target.write_bytes(data)
         if not target.is_file():
-            week["file"] = None          # referred to a sheet we never held
+            week["file"] = None
             continue
 
         week["file"] = {"name": info.get("name") or stored, "sha": digest,
@@ -229,8 +219,6 @@ def hydrate(state: dict) -> dict:
     out["weeks"] = weeks
     return out
 
-
-# ------------------------------------------------------------------- logins
 
 @lru_cache(maxsize=1)
 def password():
@@ -315,8 +303,6 @@ LOGINS = Limiter()
 WRITES = Limiter()
 
 
-# ------------------------------------------------------------------ serving
-
 class Handler(BaseHTTPRequestHandler):
     """Serves the page, the state API and the login, and nothing else.
 
@@ -330,9 +316,6 @@ class Handler(BaseHTTPRequestHandler):
     timeout = IDLE_TIMEOUT
     _read_body = False
 
-    # A public port is probed by bots within minutes, and an https request to
-    # this http server arrives as binary rubbish. Counted quietly instead of
-    # filling the window.
     junk = 0
 
     def _is_junk(self, text: str) -> bool:
@@ -352,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return
         if "timed out" in msg:
-            return                       # a browser leaving a socket idle
+            return
         if any(p in msg for p in ("Bad request", "Bad HTTP", "Request line")) \
                 or self._is_junk(msg):
             Handler.junk += 1
@@ -435,7 +418,6 @@ class Handler(BaseHTTPRequestHandler):
             return "off"
         return "ok" if self._logged_in() else "required"
 
-    # -- routes -----------------------------------------------------------
 
     def do_GET(self):
         path = self.path.split("?")[0].rstrip("/") or "/"
@@ -483,7 +465,6 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             state = read_state()
             body = hydrate(state) if state else {}
-        # 200 with nothing in it: the page needs to know a server IS here.
         self._json(200, body, [("X-WarRoom-Rev", str(state.get("_rev", 0))),
                                ("X-WarRoom-Auth", self._auth_state())])
 
@@ -516,7 +497,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
         if not hmac.compare_digest(given, want):
             LOGINS.hit(who, LOGIN_LOCKOUT)
-            time.sleep(0.5)              # a guessing script gets nowhere fast
+            time.sleep(0.5)
             return self._fail(401, "wrong password")
         LOGINS.clear(who)
         self._json(200, {"ok": True, "auth": "ok"},
@@ -572,8 +553,6 @@ class Handler(BaseHTTPRequestHandler):
             current = read_state()
             rev = int(current.get("_rev", 0))
             sent = (self.headers.get("If-Match") or "").strip('" ')
-            # Everyone holds the whole state in their browser, so a save built
-            # on an older copy would wipe whatever was added in between.
             if sent.isdigit() and int(sent) != rev:
                 return self._json(409, {"error": "someone else saved first",
                                         "rev": rev})
@@ -586,16 +565,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
-    # Windows would otherwise start a SECOND copy on a port already in use:
-    # it binds, then quietly receives nothing.
     allow_reuse_address = False
     daemon_threads = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # A ceiling on connections, and a per-address share of it - one bot
-        # holding every slot would keep the officers out just as effectively
-        # as using up the machine.
         self._open = {}
         self._owner = {}
         self._books = threading.Lock()
@@ -619,7 +593,7 @@ class Server(ThreadingHTTPServer):
         with self._books:
             who = self._owner.pop(request, None)
             if who is None:
-                return                   # already released
+                return
             if self._open.get(who, 1) > 1:
                 self._open[who] -= 1
             else:
@@ -634,7 +608,7 @@ class Server(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
         if isinstance(exc, (ConnectionError, TimeoutError, ssl.SSLError)):
-            return                       # normal on a public port
+            return
         super().handle_error(request, client_address)
 
 
@@ -665,7 +639,7 @@ class TLSServer(Server):
             sock.settimeout(IDLE_TIMEOUT)
             return self._context().wrap_socket(sock, server_side=True), addr
         except (ssl.SSLError, OSError):
-            sock.close()                 # a probe, or plain http on 443
+            sock.close()
             raise BlockingIOError
 
 
@@ -685,8 +659,6 @@ class RedirectHandler(Handler):
     do_PUT = do_POST = do_GET
 
 
-# --------------------------------------------------------------- certificate
-
 def find_cert():
     """cert.pem/key.pem, or win-acme's own naming so renewals are picked up."""
     if (HERE / "cert.pem").is_file() and (HERE / "key.pem").is_file():
@@ -694,7 +666,6 @@ def find_cert():
     keys = sorted(HERE.glob("*-key.pem"), key=lambda p: p.stat().st_mtime, reverse=True)
     for key in keys:
         stem = key.name[: -len("-key.pem")]
-        # A full chain first - some browsers reject a bare certificate.
         for suffix in ("-crt-chain.pem", "-chain.pem", "-crt.pem", ".pem"):
             cert = HERE / (stem + suffix)
             if cert.is_file() and cert != key:
@@ -726,8 +697,6 @@ def start(cert, key, ports):
     if not cert:
         return [("http", 80, bind(Server, 80, Handler))]
 
-    # https on 443 AND the plain site on 80: if 443 turns out to be blocked at
-    # the VPS firewall the site is still reachable rather than appearing dead.
     running = []
     tls = bind(TLSServer, 443, Handler, cert, key, fatal=False)
     if tls:
@@ -771,8 +740,6 @@ def announce(servers, cert):
 
 
 def main() -> None:
-    # As a startup task the output goes to a file, where block buffering would
-    # hold messages back for ages.
     try:
         sys.stdout.reconfigure(line_buffering=True)
         sys.stderr.reconfigure(line_buffering=True)

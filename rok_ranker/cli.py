@@ -92,8 +92,6 @@ def cmd_run(args) -> int:
 
 
 def main(argv=None) -> int:
-    # Shared options live on a parent parser so they work either before or
-    # after the sub-command: "rank.py -i X run" and "rank.py run -i X" both go.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("-i", "--input", default=argparse.SUPPRESS,
                         help="folder holding one sub-folder per week")
@@ -127,8 +125,6 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if not getattr(args, "cmd", None):
         args = ap.parse_args((argv or []) + ["run"])
-    # Options use SUPPRESS so they work on either side of the sub-command;
-    # fill in the defaults for whatever was not supplied.
     for dest, fallback in (("input", DEFAULT_INPUT), ("output", DEFAULT_OUTPUT),
                            ("config", DEFAULT_CONFIG)):
         if not getattr(args, dest, None):

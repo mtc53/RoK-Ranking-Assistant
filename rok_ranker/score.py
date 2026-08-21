@@ -9,7 +9,6 @@ Raw stats cannot be summed directly: kill score is power-law (one member can
 have 300x the median) while tech donations and armory points are compressed
 just under a weekly cap. Adding them would make the ranking a kill-score
 leaderboard. So each stat is converted with one of three curves:
-
   percentile - standing versus everyone else, ties take the lowest rank so a
                member who did nothing scores 0 rather than a middling tie.
   normalized - size relative to the cap_percentile performer, capped at 100,
@@ -23,7 +22,6 @@ from dataclasses import dataclass, field
 
 from .parse import ACTIVITY_FIELDS
 
-# Human labels for the report.
 METRIC_LABELS = {
     "kill_score": "Kills +",
     "kills": "Kills",
@@ -73,14 +71,12 @@ def _rank_scores(values: list[float], curve: str, cap_pct: float) -> list[float]
     if n == 1:
         return [100.0 if values[0] > 0 else 0.0]
 
-    # Percentile half: ties share the lowest rank, so a pack of zeros sits at 0.
     order = sorted(range(n), key=lambda i: values[i])
     lowest_rank: dict[float, int] = {}
     for position, idx in enumerate(order):
         lowest_rank.setdefault(values[idx], position)
     pct = [lowest_rank[v] / (n - 1) * 100.0 for v in values]
 
-    # Normalized half: share of the cap performer, capped at 100.
     ordered_values = [values[i] for i in order]
     cap = _percentile_of(ordered_values, cap_pct)
     if cap <= 0:
@@ -171,7 +167,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
     members = [dict(m) for m in week["members"]]
     prev_by_id = {m["governor_id"]: m for m in (previous or {}).get("members", [])}
 
-    # ---- derive power growth (needs a previous week) --------------------
     for m in members:
         prior = prev_by_id.get(m["governor_id"])
         if prior is not None:
@@ -187,9 +182,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
     modes = modes or {}
     new_delta = str(s_cfg.get("new_member_delta", "median")).lower()
 
-    # ---- what actually gets scored: the week's increase, or the raw value --
-    # For a stat that accumulates from a baseline scan, the value to score is
-    # how much it went UP this week, not the running total.
     effective_modes = {}
     for name in ACTIVITY_FIELDS:
         effective_modes[name] = "delta" if modes.get(name) == "delta" else "raw"
@@ -203,24 +195,16 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
             if effective_modes[name] != "delta":
                 m[f"eff_{name}"] = raw
             elif not has_previous:
-                # Nothing to compare against yet, so the gain is 0 - never the
-                # running total, which would rank veterans over this week's work.
                 m[f"eff_{name}"] = 0.0
             elif prior is not None:
-                # Clamp: a stat going down means a rebind or a scanner reset,
-                # not negative effort.
                 m[f"eff_{name}"] = max(0.0, raw - float(prior.get(name) or 0))
             else:
-                # No previous scan, so this week's increase is unknowable.
                 m[f"eff_{name}"] = None
     for m in members:
         m["eff_power_growth"] = m["power_growth"]
 
     uses_delta = any(v == "delta" for v in effective_modes.values())
 
-    # Members with no baseline get the pool median for delta stats - scoring
-    # their running total would flatter them, scoring zero would punish them
-    # for something they had no chance to demonstrate.
     for name in ACTIVITY_FIELDS:
         if effective_modes[name] != "delta":
             continue
@@ -235,7 +219,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
             if m[f"eff_{name}"] is None:
                 m[f"eff_{name}"] = m[f"total_{name}"] if fill is None else fill
 
-    # ---- which metrics actually take part -------------------------------
     metrics = []
     for name, weight in weights_cfg.items():
         weight = float(weight)
@@ -244,21 +227,17 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
         if name not in ACTIVITY_FIELDS and name != "power_growth":
             continue
         if name == "power_growth" and not has_previous:
-            continue  # no baseline yet - weight is redistributed automatically
+            continue
         if all(float(m.get(f"eff_{name}") or 0) == 0 for m in members):
-            continue  # stat not tracked, or nobody moved it this week
+            continue
         metrics.append((name, weight))
     metrics.sort(key=lambda kv: -kv[1])
     total_weight = sum(w for _, w in metrics) or 1.0
 
-    # ---- values that get scored ------------------------------------------
-    # How long someone has been in the alliance is deliberately ignored: what
-    # they put in this week is judged the same whoever they are.
     for m in members:
         for name, _ in metrics:
             m[f"adj_{name}"] = float(m.get(f"eff_{name}") or 0)
 
-    # ---- score within each pool -----------------------------------------
     if pool_mode == "alliance":
         pools: dict[str, list] = {}
         for m in members:
@@ -280,7 +259,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
             )
             m["score"] = round(base * m["inactivity_factor"], 2)
 
-        # Tier by score percentile inside the same pool.
         scores = sorted(m["score"] for m in pool)
         n = len(scores)
         for m in pool:
@@ -288,7 +266,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
             m["score_percentile"] = (below / (n - 1) * 100.0) if n > 1 else 100.0
             m["tier"] = _tier_for(m["score_percentile"], tier_cuts)
 
-    # ---- category roll-ups ----------------------------------------------
     cat_map = cfg.get("categories", {})
     cat_weights: dict[str, float] = {}
     for name, weight in metrics:
@@ -304,7 +281,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
             cat: round(total / cat_weights[cat], 1) for cat, total in totals.items()
         }
 
-    # ---- overall + per-alliance ranks ------------------------------------
     members.sort(key=lambda m: -m["score"])
     for i, m in enumerate(members, 1):
         m["rank_overall"] = i
@@ -315,7 +291,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
         for i, m in enumerate(sorted(group, key=lambda m: -m["score"]), 1):
             m["rank_in_alliance"] = i
 
-    # ---- movement versus last week ---------------------------------------
     prev_rank = {
         m["governor_id"]: m.get("rank_overall") for m in (previous or {}).get("members", [])
     }
@@ -330,7 +305,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
         m["prev_score"] = ps
         m["score_change"] = round(m["score"] - ps, 2) if ps is not None else None
 
-    # ---- flags -----------------------------------------------------------
     inactive_days = float(flags_cfg.get("inactive_days", 7))
     dead_days = float(flags_cfg.get("dead_days", 14))
     low_score = float(flags_cfg.get("low_score", 25))
@@ -350,7 +324,6 @@ def score_week(week: dict, previous: dict | None, cfg: dict,
             tags.append("NO BASELINE")
         m["flags"] = tags
 
-    # ---- alliance level summary ------------------------------------------
     summary_meta = {s["tag"]: s for s in week.get("summaries", [])}
     prev_alliance_avg = {}
     if previous:
@@ -407,7 +380,6 @@ def score_all(weeks: list[dict], cfg: dict) -> list[WeekResult]:
     for week in weeks:
         result = score_week(week, scored_prev, cfg, modes)
         results.append(result)
-        # Feed forward the scored members so ranks/scores can be compared.
         scored_prev = {"label": week["label"], "members": result.members}
     return results
 

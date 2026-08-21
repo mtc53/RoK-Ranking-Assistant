@@ -12,7 +12,6 @@ from .score import METRIC_LABELS, TIER_ORDER, departures
 
 from .parse import ACTIVITY_FIELDS
 
-# Identity and result columns, before the per-metric numbers are appended.
 CSV_FIELDS = [
     "rank_overall", "rank_in_alliance", "alliance_tag", "name", "governor_id",
     "rank", "title", "score", "tier", "score_change", "rank_change",
@@ -175,18 +174,13 @@ def write_html(result, previous, results, path: Path, cfg: dict,
     data_json = json.dumps(payload, ensure_ascii=False, default=str)
     template = (Path(__file__).parent / "template.html").read_text(encoding="utf-8")
     body = template.replace("/*__DATA__*/null", data_json)
-    # A folder named "1" should read as "Week 1", not as a bare digit.
     label = result.label.strip()
     title = f"Week {label} Rankings" if label.isdigit() else f"{label} Rankings"
     body = body.replace("__TITLE__", html.escape(title))
 
     if artifact:
-        # Published artifacts are wrapped in their own document skeleton, so
-        # the page content is handed over exactly as-is.
         out = body
     else:
-        # A standalone local file needs the full document around it, with the
-        # title lifted out of the content and into the head where it belongs.
         head_title = re.search(r"<title>.*?</title>", body, re.S)
         if head_title:
             body = body.replace(head_title.group(0), "", 1)

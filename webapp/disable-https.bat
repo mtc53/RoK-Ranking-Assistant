@@ -17,7 +17,6 @@ echo.
 echo  Turning encryption off and going back to http on port 80.
 echo.
 
-rem Keep the certificate rather than destroying it, in case it is wanted later.
 if not exist "https-disabled" mkdir "https-disabled"
 set MOVED=0
 for %%F in (*.pem) do (
@@ -30,8 +29,6 @@ if exist "https-disabled\*.pem" (
   echo   no certificate files were here
 )
 
-rem win-acme's renewal task would put new certificates back and quietly
-rem switch the site to https again, so it goes too.
 set FOUND=0
 for /f "tokens=1 delims=," %%T in ('schtasks /query /fo csv /nh 2^>nul ^| findstr /i "win-acme"') do (
   schtasks /delete /tn %%T /f >nul 2>&1
@@ -39,7 +36,6 @@ for /f "tokens=1 delims=," %%T in ('schtasks /query /fo csv /nh 2^>nul ^| findst
   set FOUND=1
 )
 
-rem Restart whichever way the site is running.
 schtasks /query /tn "Alliance War Room" >nul 2>&1
 if errorlevel 1 goto manual
 

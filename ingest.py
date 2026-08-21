@@ -34,12 +34,9 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "webapp"))
 
-from rok_ranker.parse import ParseError, parse_week      # noqa: E402
-from build import PACK_FIELDS                            # noqa: E402
+from rok_ranker.parse import ParseError, parse_week
+from build import PACK_FIELDS
 
-# The game's week turns over at 00:00 UTC on Monday. Timestamps in the export
-# are already UTC, so they compare against it directly - nothing shifts when
-# the clocks change.
 DAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
         "friday": 4, "saturday": 5, "sunday": 6}
 
@@ -52,8 +49,6 @@ def die(message: str) -> None:
     log(f"STOPPED: {message}")
     sys.exit(1)
 
-
-# ------------------------------------------------------------------ weeks
 
 def window(moment: datetime, start_day: int):
     """The seven days a scan belongs to, as (first, last) dates."""
@@ -112,8 +107,6 @@ def merge(state: dict, entry: dict, span, start_day: int) -> dict:
     slim(state, entry["id"])
     return state
 
-
-# ------------------------------------------------------------ the website
 
 class Site:
     def __init__(self, url: str, password: str | None):
@@ -175,8 +168,6 @@ class Site:
         return out
 
 
-# ----------------------------------------------------------------- filing
-
 def file_away(sheets: list[Path], activity: Path, label: str) -> None:
     """Move this run's spreadsheets into Alliance Activity\\<week>, keeping
     whatever a previous run left there rather than deleting it."""
@@ -199,8 +190,6 @@ def file_away(sheets: list[Path], activity: Path, label: str) -> None:
         shutil.move(str(path), str(dest))
     log(f"  filed under Alliance Activity\\{label}")
 
-
-# ----------------------------------------------------------------- config
 
 def first_line(path: Path) -> str | None:
     try:
@@ -231,8 +220,6 @@ def find_server(explicit: str | None) -> str:
             "site runs on THIS machine.")
     return address if "://" in address else "http://" + address
 
-
-# ------------------------------------------------------------------- main
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Upload a new activity export.")
@@ -291,12 +278,9 @@ def main() -> None:
         log("dry run - stopping before anything is moved or uploaded")
         return
 
-    # A week already on the site keeps the name it was given.
     if replacing:
         label = replacing.get("label") or label
     week_id = replacing.get("id") if replacing else f"ingest-{first:%Y%m%d}"
-    # Read the workbook where it still sits: nothing moves until the site has
-    # taken it, so a failure leaves the sheet in the inbox to retry.
     entry = pack(week, label, sheets[0] if len(sheets) == 1 else None, week_id)
 
     out = site.write(merge(state, entry, span, start_day))

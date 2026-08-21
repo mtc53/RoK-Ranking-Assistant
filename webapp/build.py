@@ -16,22 +16,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP = ROOT / "webapp"
-OUT = ROOT / "output" / "warroom.html"           # for publishing as an Artifact
-SELFHOST = ROOT / "selfhost"                     # for hosting anywhere else
+OUT = ROOT / "output" / "warroom.html"
+SELFHOST = ROOT / "selfhost"
 
-# Must match PACK_FIELDS in page.html.
 PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
                "home_kingdom", "city_hall", "power", "kill_score", "kills",
                "tech_donations", "building_time_s", "times_helped",
                "resources_donated", "forts_destroyed", "armory_points",
                "last_login", "days_inactive", "days_in_alliance"]
 
-# Everything the server needs, and nothing else.
 SHIPPED = ("server.py", "README.txt", "start.bat", "open-firewall.bat",
            "check.py", "check.bat")
 
-# What the running server writes next to itself. selfhost/ can be the live
-# server directory, so a rebuild must never delete these.
 RUNTIME = {"state.json", "state.json.bak", "state.json.new", "server.log",
            "password.txt", "private.txt", "redirect-to-https.txt", ".secret",
            "cert.pem", "key.pem"}
@@ -87,7 +83,6 @@ def build() -> Path:
     app = (WEBAPP / "app.js").read_text(encoding="utf-8")
     cfg = tomllib.load((ROOT / "config.toml").open("rb"))
 
-    # One file, so the engine is inlined as a classic script, not imported.
     app = re.sub(r"^export ", "", app, flags=re.M)
 
     out = page.replace("/*__APP__*/", app)

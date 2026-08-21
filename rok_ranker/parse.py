@@ -15,7 +15,6 @@ from pathlib import Path
 
 import openpyxl
 
-# Canonical field <- any of these header spellings (lowercased, squashed).
 HEADER_ALIASES = {
     "governor_id": ["governor id", "governorid", "id", "player id", "lord id"],
     "name": ["name", "governor name", "nickname", "player"],
@@ -50,12 +49,10 @@ SUMMARY_ALIASES = {
 }
 SUMMARY_LOOKUP = {a: f for f, aliases in SUMMARY_ALIASES.items() for a in aliases}
 
-# Stats that represent effort during the week (already period totals).
 ACTIVITY_FIELDS = [
     "kill_score", "kills", "tech_donations", "building_time_s",
     "times_helped", "resources_donated", "forts_destroyed", "armory_points",
 ]
-# Stats describing the account's current state, not its weekly effort.
 STATE_FIELDS = ["power", "city_hall", "days_inactive", "days_in_alliance"]
 
 NUMERIC_FIELDS = set(ACTIVITY_FIELDS) | {
@@ -111,7 +108,7 @@ def parse_workbook(path: Path):
     """Return (members, alliance_summaries) for one .xlsx export."""
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    except Exception as exc:  # corrupt, half-downloaded, or not really xlsx
+    except Exception as exc:
         raise ParseError(
             f"Could not open '{path.name}' in {path.parent.name}.\n"
             f"  It may be damaged, still downloading, or saved in an older .xls "
@@ -127,17 +124,12 @@ def parse_workbook(path: Path):
             if not rows:
                 continue
 
-            # Member sheets are tested first: a summary sheet never carries a
-            # Governor ID column, so this ordering stops a future export that
-            # adds an "Alliance"/"Tag" column to the member list from being
-            # mistaken for the summary.
             hdr, mmap = _find_header(rows, {"governor_id", "power"}, LOOKUP)
             if hdr is None:
                 hdr, smap = _find_header(rows, {"alliance_name", "tag"}, SUMMARY_LOOKUP)
             else:
                 smap = None
 
-            # Alliance summary sheet?
             if hdr is not None and smap is not None:
                 for row in rows[hdr + 1:]:
                     rec = {f: (row[i] if i < len(row) else None) for i, f in smap.items()}
@@ -153,7 +145,6 @@ def parse_workbook(path: Path):
                     })
                 continue
 
-            # Member sheet?
             if hdr is None:
                 continue
 
@@ -207,8 +198,6 @@ def parse_week(folder: Path) -> dict:
     if not members:
         raise ParseError(f"No member rows found in {folder}")
 
-    # A member appearing twice (two exports, or a mid-scan alliance move) is
-    # kept once - the row from the most recent scan wins.
     best: dict[int, dict] = {}
     for m in members:
         gid = m["governor_id"]
@@ -229,7 +218,6 @@ def parse_week(folder: Path) -> dict:
         m["week_label"] = folder.name
         m["scan_date"] = scan_date
 
-    # Deduplicate summaries by tag, keeping the richest row.
     by_tag: dict[str, dict] = {}
     for s in summaries:
         by_tag.setdefault(s["tag"], s)

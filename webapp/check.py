@@ -147,6 +147,6 @@ def finish() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as exc:                      # never dump a traceback
+    except Exception as exc:
         print(f"\n  The check itself failed: {exc}")
         finish()

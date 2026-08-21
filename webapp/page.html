@@ -3,9 +3,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
-  /* One committed dark treatment - a war room for a game played on a dark
-     screen. Every colour is painted explicitly so the page holds on whatever
-     ground the host renders it over. */
   :root{
     --ground:#151823; --panel:#1c2030; --raised:#232839; --line:#2f3548;
     --ink:#e8e6df; --dim:#9aa1b4; --faint:#6b7286;
@@ -98,8 +95,7 @@
   .scroll{overflow-x:auto;max-height:76vh;overflow-y:auto}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
-  /* Column separators. The last one is dropped so the grid does not end in a
-     stray line against the panel edge. */
+
   .panel th,.panel td{border-right:1px solid var(--line)}
   .panel th:last-child,.panel td:last-child{border-right:none}
   th{font-family:var(--display);font-weight:500;color:var(--dim);font-size:10px;
@@ -112,14 +108,12 @@
   tbody tr{border-left:3px solid transparent}
   tbody tr:hover{background:var(--raised)}
   td.num{text-align:right}
-  /* Spare width is shared out across every column rather than piling into
-     whichever one happens to be most flexible. */
+
   #memberTable{table-layout:auto;width:auto;min-width:0}
   #memberTable th,#memberTable td{padding-left:calc(8px + var(--spread,0px));
                                   padding-right:calc(8px + var(--spread,0px))}
   #memberTable td .sub2{margin-left:4px}
-  /* A handful of members carry two tags at once. Without this the whole
-     column widens to fit them; letting just those cells wrap keeps it tight. */
+
   #memberTable th.status{width:1px}
   #memberTable td.status{white-space:normal;max-width:104px;line-height:1.35}
   #memberTable td.status .flag{margin-bottom:2px}
@@ -166,9 +160,7 @@
   .grid2>div{min-width:0;overflow-wrap:anywhere}
   .grid2>div>b{font-family:var(--display);font-size:11.5px;text-transform:uppercase;
         letter-spacing:1.1px;color:var(--brass);font-weight:500}
-  /* These rows sit in columns of very different widths - the full-width
-     rankings table and the half-width action list - so every part has to be
-     able to shrink instead of spilling into the next column. */
+
   .mrow{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px;min-width:0}
   .mrow .lbl{flex:0 1 118px;min-width:0;color:var(--dim);
              white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -335,13 +327,8 @@
 <script>
 /*__APP__*/
 
-/* ============================================================
-   Application state, persistence and rendering
-   ============================================================ */
-
 const DEFAULT_CONFIG = /*__CONFIG__*/;
-// Weeks baked in at build time, so the page is useful the moment it opens.
-// Anything saved through the page takes over from these.
+
 const SEED = /*__SEED__*/;
 
 let STATE = { version: 1, config: structuredClone(DEFAULT_CONFIG), weeks: [] };
@@ -373,21 +360,14 @@ function setStatus(text, kind) {
   if (el) { el.textContent = text; el.className = "status " + (kind || ""); }
 }
 
-/* ---------- storage ------------------------------------------------------
-   Members are stored columnar rather than as objects: the same week is about
-   a third of the size, which matters once a season of weeks has piled up. */
 const PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
   "home_kingdom", "city_hall", "power", "kill_score", "kills", "tech_donations",
   "building_time_s", "times_helped", "resources_donated", "forts_destroyed",
   "armory_points", "last_login", "days_inactive", "days_in_alliance"];
 
-/* byRef: the self-hosted server already holds every sheet it has been sent,
-   so a save can point at one by fingerprint instead of shipping a season of
-   workbooks back up the wire every time somebody nudges a weight. Backups
-   leave it off, because a backup has to contain the sheets themselves. */
 const packWeek = (w, byRef) => ({
   id: w.id, label: w.label, scanDate: w.scanDate, summaries: w.summaries,
-  // the original .xlsx, archived verbatim
+
   file: !w.file ? null
     : byRef && w.file.sha ? { name: w.file.name, sha: w.file.sha }
     : w.file,
@@ -403,12 +383,6 @@ const unpackWeek = w => {
   };
 };
 
-/* ---------- where the data lives -----------------------------------------
-   Three homes, picked in this order:
-     artifact - published on claude.ai; saves for every viewer
-     server   - self-hosted beside the small API in server.py; saves for all
-     local    - no backend at all, so state stays in this one browser
-*/
 const Store = {
   mode: "none", api: null, preloaded: null, rev: "0", auth: "off",
 
@@ -419,7 +393,7 @@ const Store = {
     }
     try {
       const res = await fetch("api/state", { cache: "no-store" });
-      // 401 still means a server is there - it just wants a password first.
+
       if (res.ok || res.status === 401) {
         this.mode = "server";
         this.rev = res.headers.get("X-WarRoom-Rev") || "0";
@@ -427,7 +401,7 @@ const Store = {
         this.preloaded = res.ok ? await res.json() : null;
         return;
       }
-    } catch (e) { /* no backend here */ }
+    } catch (e) {  }
     this.mode = typeof localStorage !== "undefined" ? "local" : "none";
   },
 
@@ -441,7 +415,7 @@ const Store = {
       try {
         const res = await fetch("data/state.json", { cache: "no-store" });
         if (res.ok) return await res.json();
-      } catch (e) { /* nothing published yet */ }
+      } catch (e) {  }
     }
     return null;
   },
@@ -449,9 +423,7 @@ const Store = {
   async write(payload) {
     if (this.mode === "artifact") return this.api.publish({ "data/state.json": payload });
     if (this.mode === "server") {
-      // If-Match is what stops two officers with the page open from
-      // overwriting each other: the server rejects a save built on an
-      // older copy instead of taking it.
+
       const res = await fetch("api/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "If-Match": this.rev },
@@ -464,8 +436,7 @@ const Store = {
       const out = await res.json().catch(() => null);
       if (out) {
         this.rev = String(out.rev);
-        // The fingerprint each sheet was stored under, so the next save can
-        // refer to it rather than upload it again.
+
         for (const id of Object.keys(out.files || {})) {
           const week = STATE.weeks.find(w => w.id === id);
           if (week && week.file) week.file.sha = out.files[id];
@@ -478,14 +449,6 @@ const Store = {
   },
 };
 
-/* Merge saved settings onto the current defaults.
-
-   Only the things a person actually edits are carried over: the weights and
-   the flag thresholds. Everything else - which stats are running totals, the
-   curve, the tier cuts - describes how the game reports data, so it always
-   comes from this build. Otherwise a config saved months ago would quietly
-   override a corrected default, and a weight that no longer exists would
-   linger in the panel forever. */
 function mergeConfig(saved) {
   const cfg = structuredClone(DEFAULT_CONFIG);
   if (!saved) return cfg;
@@ -512,7 +475,7 @@ function queueSave() {
   if (READONLY || Store.mode === "none") return;
   clearTimeout(saveTimer);
   setStatus("unsaved", "busy");
-  saveTimer = setTimeout(save, 1200);   // batch edits into one write
+  saveTimer = setTimeout(save, 1200);
 }
 
 async function save() {
@@ -570,9 +533,6 @@ function notice(text, bad) {
     '<div class="banner' + (bad ? " bad" : "") + '">' + esc(text) + "</div>";
 }
 
-/* A self-hosted server can be given a password (password.txt, next to
-   server.py). Until it is entered the page shows everything and changes
-   nothing, so a link can still be handed round the officers. */
 function loginPrompt(message) {
   $("notice").innerHTML = '<div class="banner"><b>' + esc(message) + "</b><br>" +
     '<input id="pwInput" type="password" placeholder="Password" ' +
@@ -585,7 +545,7 @@ function loginPrompt(message) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: $("pwInput").value }),
       });
-      if (res.ok) { location.reload(); return; }   // reload: fresh data, fresh rev
+      if (res.ok) { location.reload(); return; }
       const out = await res.json().catch(() => ({}));
       $("pwMsg").textContent = out.error || "that did not work";
     } catch (e) {
@@ -596,8 +556,6 @@ function loginPrompt(message) {
   $("pwInput").onkeydown = e => { if (e.key === "Enter") go(); };
   $("pwInput").focus();
 }
-
-/* ---------- weeks --------------------------------------------------------- */
 
 function sortWeeks() {
   STATE.weeks.sort((a, b) =>
@@ -614,8 +572,8 @@ function recompute() {
 function bytesToB64(buf) {
   const u8 = new Uint8Array(buf);
   let s = "";
-  for (let i = 0; i < u8.length; i += 0x8000)   // chunked, or the arg list
-    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));  // blows the stack
+  for (let i = 0; i < u8.length; i += 0x8000)
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
   return btoa(s);
 }
 function b64ToBytes(b64) {
@@ -636,14 +594,14 @@ async function addFiles(files) {
       const parsed = await parseMembers(buf);
       const label = file.name.replace(/\.xlsx$/i, "").slice(0, 60);
       const scan = parsed.scanDate;
-      // Same scan date means the same week re-exported - replace it.
+
       const existing = STATE.weeks.findIndex(w => w.scanDate && scan &&
         w.scanDate.slice(0, 10) === scan.slice(0, 10));
       const week = {
         id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
         label: existing >= 0 ? STATE.weeks[existing].label : label,
         scanDate: scan, members: parsed.members, summaries: parsed.summaries,
-        // Archived as uploaded, so a week can be rebuilt or handed back later.
+
         file: { name: file.name, b64: bytesToB64(buf) },
       };
       if (existing >= 0) STATE.weeks[existing] = week; else STATE.weeks.push(week);
@@ -670,8 +628,6 @@ function removeWeek(id) {
   queueSave();
 }
 
-/* ---------- rendering ----------------------------------------------------- */
-
 function renderWeekList() {
   const el = $("weekList");
   if (!STATE.weeks.length) {
@@ -686,8 +642,11 @@ function renderWeekList() {
         w.file ? " &middot; sheet saved" : ""}</span>
       ${w.file && Store.mode !== "artifact"
         ? `<button data-xlsx="${esc(w.id)}">.xlsx</button>` : ""}
+
       <button class="danger" data-del="${esc(w.id)}">Remove</button>
+
     </div>`).join("");
+
   el.querySelectorAll("input").forEach(inp => {
     inp.onchange = () => {
       const w = STATE.weeks.find(x => x.id === inp.dataset.id);
@@ -752,10 +711,6 @@ function renderTabs() {
   });
 }
 
-/* Which stat columns to show. Driven by the weights a person set, not by
-   whether the stat could be scored this week: a running total with no previous
-   week to compare against scores nothing, but its column should still be
-   there reading 0, so it is obvious why. */
 const METRIC_ORDER = ["kill_score", "tech_donations", "times_helped",
   "armory_points", "forts_destroyed", "building_time_s", "resources_donated",
   "kills"];
@@ -766,9 +721,6 @@ const sevOf = m => m.flags.includes("DEAD") ? "sev-crit"
   : m.flags.includes("INACTIVE") ? "sev-warn"
   : m.flags.includes("LOW") ? "sev-low" : "";
 
-/* The table is sized by its content, then any width the panel has left over
-   is shared out equally as extra padding on every column - so the columns
-   breathe evenly instead of one of them swallowing the lot. */
 function spreadColumns() {
   const tbl = document.getElementById("memberTable");
   if (!tbl) return;
@@ -834,8 +786,6 @@ function render() {
     <td class="num">${fmt(a.total_power)}</td>
     ${r.metrics.map(k => `<td class="num">${fmt(a.totals[k])}</td>`).join("")}</tr>`).join("");
 
-  // Table headings are abbreviated: the header text, not the numbers, is what
-  // makes these columns wide. Full names stay in the scorecard and the FAQ.
   const SHORT = {
     kill_score: "Kill", kills: "Kills", tech_donations: "Tech",
     times_helped: "Helps", armory_points: "Armory", forts_destroyed: "Forts",
@@ -845,13 +795,14 @@ function render() {
     { k: "rank_overall", t: "#", n: 1, f: m => m.rank_overall },
     { k: "name", t: "Governor", n: 0,
       f: m => `<span class="nm">${esc(m.name)}</span>` +
+
         (m.title ? `<br><span class="sub2">${esc(m.title)}</span>` : "") },
     { k: "alliance_tag", t: "Ally", n: 0, f: m => esc(m.alliance_tag) },
     { k: "rank", t: "Rk", n: 0, f: m => esc(m.rank || "") },
     { k: "score", t: "Score", n: 1, f: m =>
         `<div class="bar"><i style="width:${m.score}%"></i><b>${m.score.toFixed(1)}</b></div>` },
     { k: "tier", t: "Tier", n: 0, f: m => `<span class="tier ${m.tier}">${m.tier}</span>` },
-    // Both are empty until a second week exists, so they only appear then.
+
     ...(r.hasPrevious ? [
       { k: "score_change", t: "+/-", n: 1, f: m => delta(m.score_change) },
       { k: "rank_change", t: "Move", n: 1, f: m => delta(m.rank_change) },
@@ -865,8 +816,7 @@ function render() {
         (m.days_inactive > 0
           ? `<span class="sub2">${m.days_inactive}d idle</span>` : "") },
   ].concat(shownMetrics(r).flatMap(k => {
-    // Kill score is a running total, so the total and the weekly gain get a
-    // column each - side by side, never mixed into one cell.
+
     const total = {
       k: isDelta(k) ? "total_" + k : "eff_" + k,
       t: SHORT[k] || METRIC_LABELS[k] || k, n: 1,
@@ -931,58 +881,81 @@ function render() {
           <span class="chip ${VIEW.alliance ? "" : "on"}" tabindex="0" data-ally="">All</span>
           ${r.alliances.map(a => `<span class="chip ${VIEW.alliance === a.tag ? "on" : ""}"
             tabindex="0" data-ally="${esc(a.tag)}">${esc(a.tag)}</span>`).join("")}
+
         </span>
+
         <select id="tierSel" aria-label="Filter by tier">
           <option value="">All tiers</option>
+
           ${TIER_ORDER.map(t => `<option value="${t}" ${VIEW.tier === t ? "selected" : ""}
             >${t} tier</option>`).join("")}
         </select>
+
         <select id="flagSel" aria-label="Filter by status">
           ${[["", "All members"], ["DEAD", "Kick candidates"], ["INACTIVE", "Inactive"],
              ["LOW", "Low activity"], ["NO SUPPORT", "No support given"],
              ["NO BASELINE", "No baseline"]].map(([v, l]) =>
             `<option value="${v}" ${VIEW.flag === v ? "selected" : ""}>${l}</option>`).join("")}
         </select>
+
         <span class="topx">
           <label for="topXInput">Top</label>
+
           <input type="number" id="topXInput" min="1" max="${ms.length}" step="1"
                  value="${VIEW.topX}" aria-label="Number of top members to export">
           <button id="topXBtn" class="primary">Export Top Members</button>
+
         </span>
+
         <span class="count">${rows.length} shown</span>
+
       </div>
+
       <div class="panel"><div class="scroll"><table id="memberTable">
         <thead><tr>${COLS.map(c => `<th data-k="${c.k}" class="${c.n ? "num" : ""} ${
           c.k === VIEW.sortKey ? "sorted " + (VIEW.sortAsc ? "asc" : "") : ""}">${esc(c.t)}</th>`)
           .join("")}</tr></thead>
         <tbody>${rows.map(m => `<tr class="expander ${sevOf(m)}" data-id="${m.governor_id}">${
           COLS.map(c => `<td class="${c.n ? "num" : ""} ${c.cls || ""}">${c.f(m)}</td>`)
+
           .join("")}</tr>`).join("")}
+
         </tbody></table></div></div>
       <p class="note">Click any row for the full scorecard and week-by-week history.</p>
+
     </section>
 
     <div class="split">
       <section><h2>Action List</h2><div class="panel"><div class="scroll" style="max-height:430px">
+
         <table id="actionTable"><thead><tr><th>Ally</th><th>Governor</th><th class="num">Score</th><th>Tier</th>
         <th class="num">Idle</th><th class="num">Power</th><th>Why</th></tr></thead>
+
         <tbody>${actionRows || '<tr><td colspan="7">Nothing flagged &ndash; clean week.</td></tr>'}
         </tbody></table></div>
+
         <p class="note" style="padding:0 12px 10px">Click a row for their full
         scorecard.</p></div></section>
+
       <section><h2>Departures (${left.length})</h2>
+
         <div class="panel"><div class="scroll" style="max-height:430px">
         <table><thead><tr><th>Was in</th><th>Governor</th><th class="num">Power</th>
+
         <th class="num">Last score</th><th>Tier</th></tr></thead>
         <tbody>${depRows || '<tr><td colspan="5">' + (r.hasPrevious ?
           "Nobody left since last week." : "Tracked once a second week is loaded.") +
           "</td></tr>"}</tbody></table></div></div></section>
+
     </div>
 
     <section><h2>How The Score Works</h2><div class="panel" style="padding:17px 19px">
+
       <div class="grid2">
         <div><b>Weighting</b>${r.metrics.map(k => `
+
           <div class="mrow"><span class="lbl">${esc(METRIC_LABELS[k] || k)}</span>
+
           <span class="mini"><i style="width:${STATE.config.weights[k] / wTotal * 100}%"></i></span>
           <span class="val">${(STATE.config.weights[k] / wTotal * 100).toFixed(0)}%</span></div>`).join("")}
         </div>
@@ -992,6 +965,7 @@ function render() {
             if (!idle.length) return "";
             const names = idle.map(k => METRIC_LABELS[k] || k).join(" and ");
             return `<b>${names}</b> ${idle.length > 1 ? "are" : "is"} not counted this
+
               week: ${idle.length > 1 ? "they are" : "it is"} a running total, and there
               is no earlier week to measure the gain against.
               ${idle.length > 1 ? "Their" : "Its"} weight is shared out across the other
@@ -1007,7 +981,6 @@ function render() {
         </div></div>
       </div></div></section>`;
 
-  // events for the freshly rendered markup
   const q = $("q");
   q.oninput = () => {
     VIEW.q = q.value.trim().toLowerCase();
@@ -1032,7 +1005,7 @@ function render() {
     else { VIEW.sortKey = k; VIEW.sortAsc = ["rank_overall", "name", "alliance_tag"].includes(k); }
     render();
   });
-  // The action list expands exactly like the rankings table does.
+
   [["#memberTable", COLS.length], ["#actionTable", 7]].forEach(([sel, span]) => {
     document.querySelectorAll(sel + " tr.expander").forEach(tr => tr.onclick = () => {
       const next = tr.nextElementSibling;
@@ -1049,7 +1022,6 @@ function render() {
     SCORED.map(x => x.label).join(", ");
 }
 
-// the share-out depends on how wide the window is, so redo it on resize
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
@@ -1088,11 +1060,6 @@ function detailRow(m, r, span) {
     </div></div></td></tr>`;
 }
 
-/* ---------- getting data back out ---------------------------------------
-   A normal browser can be handed a file directly. Inside the claude.ai
-   viewer that is blocked, and its download capability does not allow
-   .xlsx at all - so there the backup .json (which carries the archived
-   sheets inside it) is the way out. */
 function downloadBytes(bytes, filename, mime) {
   const url = URL.createObjectURL(new Blob([bytes], { type: mime || "application/octet-stream" }));
   const a = document.createElement("a");
@@ -1125,8 +1092,7 @@ async function exportTopX() {
   const input = $("topXInput");
   const n = Math.max(1, Math.min(r.members.length, Math.round(+input.value) || VIEW.topX));
   VIEW.topX = n; input.value = n;
-  // r.members is already ranked kingdom-wide by score (rank_overall order),
-  // so this ignores whatever search/alliance/tier filter is on the table.
+
   const lines = ["Top " + n + " Users:"];
   r.members.slice(0, n).forEach((m, i) => lines.push((i + 1) + ". " + m.name));
   const text = lines.join("\n") + "\n";
@@ -1159,8 +1125,6 @@ async function restoreBackup(file) {
     notice("That backup could not be read: " + e.message, true);
   }
 }
-
-/* ---------- wiring -------------------------------------------------------- */
 
 $("pickBtn").onclick = () => $("picker").click();
 $("picker").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
