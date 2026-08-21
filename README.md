@@ -165,7 +165,7 @@ That writes two things:
 | Output | For |
 |---|---|
 | `output/warroom.html` | publishing as a claude.ai link |
-| `output/selfhost/` | hosting on your own server - see the README.txt inside |
+|  `selfhost/` | hosting on your own server - see the README.txt inside |
 
 Whatever weeks are in `Alliance Activity` are baked in as starting data, so
 the page is useful the moment it opens.
@@ -174,6 +174,19 @@ In the page, R5s can add weekly spreadsheets, rename or remove weeks, change
 every scoring weight and threshold, and download a backup. Uploaded
 spreadsheets are archived inside the saved data, so no week is ever reduced
 to just its numbers.
+
+If you host it yourself, `selfhost/README.txt` covers the server side.
+Three things worth knowing before it faces the internet:
+
+- **Put a password in `password.txt`** next to `server.py`. Without one,
+  anyone who can open the page can change the rankings. With one, everybody
+  can still read the page and only the password lets them change anything.
+- **Saves cannot overwrite each other.** If two officers have the page open
+  and both save, the second one is told and reloaded rather than silently
+  wiping the first.
+- **The server keeps its own backups** - the previous save as
+  `state.json.bak` and the last ten in `backups\`. They are on the same
+  machine, so keep using Download backup for anything you would hate to lose.
 
 Sources live in `webapp/`:
 

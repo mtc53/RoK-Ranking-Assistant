@@ -106,7 +106,7 @@ def main() -> None:
         return finish()
     print(f"[4] Page loads        OK  ({size} bytes over {scheme})")
     if scheme == "http" and port != 443:
-        print("                          (not encrypted - setup-https.bat adds that)")
+        print("                          (not encrypted - normal; see README.txt)")
 
     rules = firewall_rules()
     allowed = f"LocalPort:                            {port}" in rules.replace("\r", "")

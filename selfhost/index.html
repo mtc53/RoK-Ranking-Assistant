@@ -1023,9 +1023,16 @@ const PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
   "building_time_s", "times_helped", "resources_donated", "forts_destroyed",
   "armory_points", "last_login", "days_inactive", "days_in_alliance"];
 
-const packWeek = w => ({
+/* byRef: the self-hosted server already holds every sheet it has been sent,
+   so a save can point at one by fingerprint instead of shipping a season of
+   workbooks back up the wire every time somebody nudges a weight. Backups
+   leave it off, because a backup has to contain the sheets themselves. */
+const packWeek = (w, byRef) => ({
   id: w.id, label: w.label, scanDate: w.scanDate, summaries: w.summaries,
-  file: w.file || null,   // the original .xlsx, archived verbatim
+  // the original .xlsx, archived verbatim
+  file: !w.file ? null
+    : byRef && w.file.sha ? { name: w.file.name, sha: w.file.sha }
+    : w.file,
   cols: PACK_FIELDS, rows: w.members.map(m => PACK_FIELDS.map(f => m[f] ?? null)),
 });
 const unpackWeek = w => {
@@ -1045,7 +1052,7 @@ const unpackWeek = w => {
      local    - no backend at all, so state stays in this one browser
 */
 const Store = {
-  mode: "none", api: null, preloaded: null,
+  mode: "none", api: null, preloaded: null, rev: "0", auth: "off",
 
   async detect() {
     if (typeof claude !== "undefined" && claude.use) {
@@ -1054,7 +1061,14 @@ const Store = {
     }
     try {
       const res = await fetch("api/state", { cache: "no-store" });
-      if (res.ok) { this.preloaded = await res.json(); this.mode = "server"; return; }
+      // 401 still means a server is there - it just wants a password first.
+      if (res.ok || res.status === 401) {
+        this.mode = "server";
+        this.rev = res.headers.get("X-WarRoom-Rev") || "0";
+        this.auth = res.headers.get("X-WarRoom-Auth") || (res.ok ? "off" : "required");
+        this.preloaded = res.ok ? await res.json() : null;
+        return;
+      }
     } catch (e) { /* no backend here */ }
     this.mode = typeof localStorage !== "undefined" ? "local" : "none";
   },
@@ -1077,9 +1091,28 @@ const Store = {
   async write(payload) {
     if (this.mode === "artifact") return this.api.publish({ "data/state.json": payload });
     if (this.mode === "server") {
+      // If-Match is what stops two officers with the page open from
+      // overwriting each other: the server rejects a save built on an
+      // older copy instead of taking it.
       const res = await fetch("api/state", {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: payload });
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "If-Match": this.rev },
+        body: payload });
+      if (res.status === 409) throw { code: "conflict" };
+      if (res.status === 401) throw { code: "needs_login" };
+      if (res.status === 413) throw { code: "too_large" };
+      if (res.status === 429) throw { code: "rate_limited" };
       if (!res.ok) throw { code: "upstream_error", message: "the server returned " + res.status };
+      const out = await res.json().catch(() => null);
+      if (out) {
+        this.rev = String(out.rev);
+        // The fingerprint each sheet was stored under, so the next save can
+        // refer to it rather than upload it again.
+        for (const id of Object.keys(out.files || {})) {
+          const week = STATE.weeks.find(w => w.id === id);
+          if (week && week.file) week.file.sha = out.files[id];
+        }
+      }
       return;
     }
     if (this.mode === "local") { localStorage.setItem("rok-warroom", payload); return; }
@@ -1129,7 +1162,8 @@ async function save() {
   clearTimeout(saveTimer);
   setStatus("saving…", "busy");
   const payload = JSON.stringify({
-    version: 1, config: STATE.config, weeks: STATE.weeks.map(packWeek),
+    version: 1, config: STATE.config,
+    weeks: STATE.weeks.map(w => packWeek(w, Store.mode === "server")),
   });
   try {
     await Store.write(payload);
@@ -1141,6 +1175,12 @@ async function save() {
       goReadOnly("You have view-only access, so changes will not be saved for others.", true);
     } else if (code === "conflict") {
       setStatus("someone else saved first – reloading", "busy");
+      notice("Someone else saved a change while this page was open. " +
+             "Reloading, so their work is not overwritten.", false);
+      setTimeout(() => location.reload(), 1800);
+    } else if (code === "needs_login") {
+      setStatus("not logged in", "err");
+      loginPrompt("Your session has ended. Log in again to keep saving.");
     } else if (code === "too_large") {
       setStatus("too much data to save", "err");
       notice("The saved data is too large. Remove an older week and try again.", true);
@@ -1170,6 +1210,33 @@ function goReadOnly(message, hide) {
 function notice(text, bad) {
   $("notice").innerHTML =
     '<div class="banner' + (bad ? " bad" : "") + '">' + esc(text) + "</div>";
+}
+
+/* A self-hosted server can be given a password (password.txt, next to
+   server.py). Until it is entered the page shows everything and changes
+   nothing, so a link can still be handed round the officers. */
+function loginPrompt(message) {
+  $("notice").innerHTML = '<div class="banner"><b>' + esc(message) + "</b><br>" +
+    '<input id="pwInput" type="password" placeholder="Password" ' +
+    'autocomplete="current-password" style="max-width:220px"> ' +
+    '<button id="pwBtn">Log in</button> <span id="pwMsg"></span></div>';
+  const go = async () => {
+    $("pwMsg").textContent = "checking...";
+    try {
+      const res = await fetch("api/login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: $("pwInput").value }),
+      });
+      if (res.ok) { location.reload(); return; }   // reload: fresh data, fresh rev
+      const out = await res.json().catch(() => ({}));
+      $("pwMsg").textContent = out.error || "that did not work";
+    } catch (e) {
+      $("pwMsg").textContent = "could not reach the server";
+    }
+  };
+  $("pwBtn").onclick = go;
+  $("pwInput").onkeydown = e => { if (e.key === "Enter") go(); };
+  $("pwInput").focus();
 }
 
 /* ---------- weeks --------------------------------------------------------- */
@@ -1678,7 +1745,7 @@ function downloadBytes(bytes, filename, mime) {
 
 async function downloadBackup() {
   const payload = JSON.stringify({
-    version: 1, config: STATE.config, weeks: STATE.weeks.map(packWeek),
+    version: 1, config: STATE.config, weeks: STATE.weeks.map(w => packWeek(w)),
   });
   const name = "warroom-backup-" + new Date().toISOString().slice(0, 10) + ".json";
   if (Store.mode === "artifact") {
@@ -1773,6 +1840,10 @@ $("resetCfg").onclick = () => {
   }[Store.mode];
   $("storeMode").textContent = where;
   if (Store.mode === "none") goReadOnly(where, false);
+  if (Store.mode === "server" && Store.auth === "required") {
+    goReadOnly(null, true);
+    loginPrompt("This site is read-only until you log in.");
+  }
   if (!STATE.weeks.length) $("dataTool").open = true;
 })();
 </script>

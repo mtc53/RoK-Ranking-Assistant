@@ -108,7 +108,9 @@ def build() -> Path:
     # just a scratch build target.
     keep = {"index.html", "server.py", "README.txt", "start.bat",
             "open-firewall.bat", "check.py", "check.bat", "install-autostart.bat"}
-    runtime = {"state.json", "server.log", "https-on.txt", "cert.pem", "key.pem"}
+    runtime = {"state.json", "state.json.bak", "state.json.new", "server.log",
+               "password.txt", "private.txt", "redirect-to-https.txt",
+               ".secret", "cert.pem", "key.pem"}
     for stale in SELFHOST.iterdir():
         if not stale.is_file() or stale.name in keep or stale.name in runtime:
             continue
