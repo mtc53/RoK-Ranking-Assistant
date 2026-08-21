@@ -216,8 +216,11 @@
         export onto the box (or click <b>Choose .xlsx files</b>). The rankings
         rebuild straight away. Weeks sort themselves by the scan date inside
         the file, so it does not matter what order you add them in.</p>
-        <p>Uploading the same week twice replaces it rather than duplicating
-        it, so a corrected export is safe to re-upload.</p>
+        <p>A week runs from one weekly reset to the next. Any export scanned
+        inside that window replaces the one already there rather than adding a
+        second entry, so you can drop in a fresh scan every day and the week
+        simply stays up to date. The first scan taken after a reset starts the
+        next week, and the finished one stays put for the comparison.</p>
 
         <h3>What does the score mean?</h3>
         <p>A number from 0 to 100 measuring this week&rsquo;s effort against
@@ -557,6 +560,16 @@ function loginPrompt(message) {
   $("pwInput").focus();
 }
 
+const WEEK_RESET_DAY = 1;
+
+function weekKey(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  if (!m) return null;
+  const day = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  const back = (new Date(day).getUTCDay() - WEEK_RESET_DAY + 7) % 7;
+  return new Date(day - back * 86400000).toISOString().slice(0, 10);
+}
+
 function sortWeeks() {
   STATE.weeks.sort((a, b) =>
     String(a.scanDate || a.label).localeCompare(String(b.scanDate || b.label)));
@@ -587,7 +600,7 @@ async function addFiles(files) {
   const list = [...files].filter(f => f.name.toLowerCase().endsWith(".xlsx"));
   if (!list.length) return notice("Those are not .xlsx files.", true);
   setStatus("reading…", "busy");
-  let added = 0, failed = [];
+  let added = 0, replaced = 0, failed = [];
   for (const file of list) {
     try {
       const buf = await file.arrayBuffer();
@@ -595,16 +608,18 @@ async function addFiles(files) {
       const label = file.name.replace(/\.xlsx$/i, "").slice(0, 60);
       const scan = parsed.scanDate;
 
-      const existing = STATE.weeks.findIndex(w => w.scanDate && scan &&
-        w.scanDate.slice(0, 10) === scan.slice(0, 10));
+      const key = weekKey(scan);
+      const clash = STATE.weeks.filter(w => key && weekKey(w.scanDate) === key);
       const week = {
-        id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
-        label: existing >= 0 ? STATE.weeks[existing].label : label,
+        id: clash.length ? clash[0].id
+          : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
+        label: clash.length ? clash[0].label : label,
         scanDate: scan, members: parsed.members, summaries: parsed.summaries,
-
         file: { name: file.name, b64: bytesToB64(buf) },
       };
-      if (existing >= 0) STATE.weeks[existing] = week; else STATE.weeks.push(week);
+      STATE.weeks = STATE.weeks.filter(w => !clash.includes(w));
+      STATE.weeks.push(week);
+      replaced += clash.length;
       added++;
     } catch (e) {
       failed.push(file.name + " - " + e.message);
@@ -614,8 +629,10 @@ async function addFiles(files) {
   VIEW.weekIndex = SCORED.length - 1;
   render();
   if (failed.length) notice("Could not read: " + failed.join("; "), true);
-  else if (added) notice(added + (added === 1 ? " week added." : " weeks added.") +
-    " Rename any week below so the labels read the way you want.", false);
+  else if (added) notice(
+    replaced ? "This week's numbers replaced with the newer scan."
+      : added + (added === 1 ? " week added." : " weeks added.") +
+        " Rename any week below so the labels read the way you want.", false);
   queueSave();
 }
 

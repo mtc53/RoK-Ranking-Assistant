@@ -138,7 +138,7 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
         if info.get("sha") and info.get("stored"):
             known[info["sha"]] = info["stored"]
 
-    taken, held = set(), {}
+    taken, held, by_digest = set(), {}, {}
     for week in payload.get("weeks", []):
         info = week.get("file")
         if not isinstance(info, dict):
@@ -163,9 +163,9 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
         wanted = f"{base}.xlsx"
         if wanted in taken:
             wanted = f"{base}-{digest[:8]}.xlsx"
-        stored = known.get(digest, wanted)
+        stored = by_digest.get(digest) or known.get(digest, wanted)
 
-        if stored != wanted and wanted not in taken and not (UPLOADS / wanted).is_file():
+        if digest not in by_digest and stored != wanted                 and wanted not in taken and not (UPLOADS / wanted).is_file():
             try:
                 if (UPLOADS / stored).is_file():
                     os.replace(UPLOADS / stored, UPLOADS / wanted)
@@ -183,6 +183,7 @@ def sync_uploads(payload: dict, previous: dict) -> dict:
 
         week["file"] = {"name": info.get("name") or stored, "sha": digest,
                         "size": target.stat().st_size, "stored": stored}
+        by_digest[digest] = stored
         taken.add(stored)
         held[str(week.get("id"))] = digest
 
