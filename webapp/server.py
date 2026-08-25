@@ -689,9 +689,13 @@ def bind(cls, port, *args, fatal=True):
 
 
 def start(cert, key, ports):
-    """Which ports to listen on, as (scheme, port, server)."""
-    if ports:
-        port = int(ports[0])
+    """Which ports to listen on, as (scheme, port, server).
+
+    Port 80 always means the plain site, given or defaulted, so asking for it
+    never puts https where browsers expect http.
+    """
+    port = int(ports[0]) if ports else 80
+    if port != 80:
         if cert:
             return [("https", port, bind(TLSServer, port, Handler, cert, key))]
         return [("http", port, bind(Server, port, Handler))]

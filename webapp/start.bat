@@ -16,7 +16,7 @@ echo  ============================================
 echo.
 echo   Leave this window OPEN. Closing it stops the site.
 echo.
-python server.py %PORT%
+python server.py %1
 echo.
 echo  The server stopped. If it said "permission denied" or
 echo  "address already in use", try a different port:
