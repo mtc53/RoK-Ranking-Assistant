@@ -96,11 +96,11 @@ def slim(state: dict, keep_id: str) -> None:
             week["file"] = {"name": info.get("name"), "sha": info["sha"]}
 
 
-def merge(state: dict, entry: dict, span, start_day: int) -> dict:
-    """Put the week in, replacing whatever already covers the same days."""
+def merge(state: dict, entry: dict) -> dict:
+    """Add the scan, replacing only one taken at the very same moment."""
     weeks = [w for w in (state.get("weeks") or [])
              if w.get("id") != entry["id"]
-             and window(scan_of(w) or datetime.min, start_day) != span]
+             and w.get("scanDate") != entry.get("scanDate")]
     weeks.append(entry)
     state["weeks"] = weeks
     state.setdefault("version", 1)
@@ -266,11 +266,16 @@ def main() -> None:
     site.sign_in()
     state = site.read()
 
-    replacing = next((w for w in (state.get("weeks") or [])
-                      if scan_of(w) and window(scan_of(w), start_day) == span), None)
-    if replacing:
-        log(f"  the site already has this week (\"{replacing.get('label')}\")"
-            f" - refreshing it")
+    existing = state.get("weeks") or []
+    same_scan = next((w for w in existing
+                      if w.get("scanDate") == week["scan_date"].isoformat() + "Z"), None)
+    same_week = [w for w in existing
+                 if scan_of(w) and window(scan_of(w), start_day) == span]
+    if same_scan:
+        log("  this exact scan is already on the site - refreshing it")
+    elif same_week:
+        log(f"  adding this scan to the week of {label}"
+            f" ({len(same_week)} already there)")
     else:
         log("  this is a new week for the site")
 
@@ -278,19 +283,20 @@ def main() -> None:
         log("dry run - stopping before anything is moved or uploaded")
         return
 
-    if replacing:
-        label = replacing.get("label") or label
-    week_id = replacing.get("id") if replacing else f"ingest-{first:%Y%m%d}"
+    if same_week:
+        label = same_week[0].get("label") or label
+    week_id = (same_scan.get("id") if same_scan
+               else f"ingest-{week['scan_date']:%Y%m%d-%H%M%S}")
     entry = pack(week, label, sheets[0] if len(sheets) == 1 else None, week_id)
 
-    out = site.write(merge(state, entry, span, start_day))
+    out = site.write(merge(state, entry))
     if out.get("conflict"):
         log("  somebody else saved while this was running - reapplying")
-        out = site.write(merge(site.read(), entry, span, start_day))
+        out = site.write(merge(site.read(), entry))
         if out.get("conflict"):
             die("the site kept changing underneath this. Try again in a moment.")
 
-    log(f"uploaded - the site now has {out.get('weeks')} week(s), "
+    log(f"uploaded - the site now has {out.get('weeks')} scan(s), "
         f"revision {out.get('rev')}")
     file_away(sheets, args.activity, label)
 

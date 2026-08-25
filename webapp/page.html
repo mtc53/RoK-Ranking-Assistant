@@ -41,6 +41,10 @@
   section{display:flex;flex-direction:column}
 
   .chipbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .modes{display:inline-flex;gap:0;margin-right:8px}
+  .modes .chip{border-radius:0}
+  .modes .chip:first-child{border-radius:2px 0 0 2px}
+  .modes .chip:last-child{border-radius:0 2px 2px 0;margin-left:-1px}
   .chip{background:var(--raised);border:1px solid var(--line);color:var(--dim);
         border-radius:2px;padding:7px 14px;cursor:pointer;font-size:11.5px;
         font-family:var(--display);font-weight:500;letter-spacing:.9px;text-transform:uppercase}
@@ -336,7 +340,11 @@ const SEED = /*__SEED__*/;
 
 let STATE = { version: 1, config: structuredClone(DEFAULT_CONFIG), weeks: [] };
 let VIEW = { weekIndex: -1, alliance: "", tier: "", flag: "", q: "",
-             sortKey: "r", sortAsc: true, topX: 25 };
+             sortKey: "r", sortAsc: true, topX: 25,
+             mode: (() => {
+               try { return localStorage.getItem("rok-view-mode") === "day" ? "day" : "week"; }
+               catch (e) { return "week"; }
+             })() };
 let SCORED = [];
 let READONLY = false;
 let api = null;
@@ -589,9 +597,47 @@ function sortWeeks() {
     String(a.scanDate || a.label).localeCompare(String(b.scanDate || b.label)));
 }
 
+function dayLabel(iso, ambiguous) {
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  const stamp = d.getUTCDate() + " " + MONTHS[d.getUTCMonth()].slice(0, 3);
+  if (!ambiguous) return stamp;
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  return stamp + " " + hh + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+}
+
+function visibleWeeks() {
+  sortWeeks();
+  if (VIEW.mode === "day") {
+    const seen = {};
+    STATE.weeks.forEach(w => {
+      const d = String(w.scanDate || "").slice(0, 10);
+      seen[d] = (seen[d] || 0) + 1;
+    });
+    return STATE.weeks.map(w => Object.assign({}, w, {
+      label: dayLabel(w.scanDate, seen[String(w.scanDate || "").slice(0, 10)] > 1),
+    }));
+  }
+  const latest = {};
+  STATE.weeks.forEach(w => {
+    const k = weekKey(w.scanDate) || w.id;
+    if (!latest[k] || String(w.scanDate) > String(latest[k].scanDate)) latest[k] = w;
+  });
+  return Object.keys(latest).sort().map(k => latest[k]);
+}
+
+function setMode(mode) {
+  VIEW.mode = mode === "day" ? "day" : "week";
+  try { localStorage.setItem("rok-view-mode", VIEW.mode); } catch (e) { }
+  recompute();
+  VIEW.weekIndex = SCORED.length - 1;
+  render();
+}
+
 function recompute() {
   sortWeeks();
-  SCORED = STATE.weeks.length ? scoreAll(STATE.weeks, STATE.config).results : [];
+  const shown = visibleWeeks();
+  SCORED = shown.length ? scoreAll(shown, STATE.config).results : [];
   if (VIEW.weekIndex < 0 || VIEW.weekIndex >= SCORED.length)
     VIEW.weekIndex = SCORED.length - 1;
 }
@@ -622,18 +668,17 @@ async function addFiles(files) {
       const label = file.name.replace(/\.xlsx$/i, "").slice(0, 60);
       const scan = parsed.scanDate;
 
-      const key = weekKey(scan);
-      const clash = STATE.weeks.filter(w => key && weekKey(w.scanDate) === key);
-      const week = {
-        id: clash.length ? clash[0].id
+      const same = STATE.weeks.filter(w => w.scanDate === scan);
+      const snapshot = {
+        id: same.length ? same[0].id
           : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
-        label: clash.length ? clash[0].label : (weekLabel(scan) || label),
+        label: weekLabel(scan) || label,
         scanDate: scan, members: parsed.members, summaries: parsed.summaries,
         file: { name: file.name, b64: bytesToB64(buf) },
       };
-      STATE.weeks = STATE.weeks.filter(w => !clash.includes(w));
-      STATE.weeks.push(week);
-      replaced += clash.length;
+      STATE.weeks = STATE.weeks.filter(w => !same.includes(w));
+      STATE.weeks.push(snapshot);
+      replaced += same.length;
       added++;
     } catch (e) {
       failed.push(file.name + " - " + e.message);
@@ -644,8 +689,8 @@ async function addFiles(files) {
   render();
   if (failed.length) notice("Could not read: " + failed.join("; "), true);
   else if (added) notice(
-    replaced ? "This week's numbers replaced with the newer scan."
-      : added + (added === 1 ? " week added." : " weeks added."), false);
+    replaced ? "That scan was already here - it has been refreshed."
+      : added + (added === 1 ? " scan added." : " scans added."), false);
   queueSave();
 }
 
@@ -664,7 +709,7 @@ function renderWeekList() {
     el.innerHTML = '<p class="note" style="margin:0">No weeks yet. Add an export above.</p>';
     return;
   }
-  el.innerHTML = STATE.weeks.map(w => `
+  el.innerHTML = visibleWeeks().map(w => `
     <div class="weekrow" data-id="${esc(w.id)}">
       <input value="${esc(w.label)}" aria-label="Week name" data-id="${esc(w.id)}">
       <span class="meta">${w.members.length} members${
@@ -730,12 +775,25 @@ function renderConfig() {
 }
 
 function renderTabs() {
-  $("weekTabs").innerHTML =
+  const weeks = new Set(STATE.weeks.map(w => weekKey(w.scanDate) || w.id));
+  const canSplit = STATE.weeks.length > weeks.size;
+  const toggle = canSplit || VIEW.mode === "day"
+    ? `<span class="modes" role="group" aria-label="Compare by">` +
+      ["week", "day"].map(m =>
+        `<span class="chip mode ${VIEW.mode === m ? "on" : ""}" tabindex="0"
+          data-mode="${m}">${m === "week" ? "Week" : "Day"}</span>`).join("") +
+      `</span>` : "";
+  $("weekTabs").innerHTML = toggle +
     SCORED.map((r, i) => `<span class="chip ${i === VIEW.weekIndex ? "on" : ""}"
       tabindex="0" data-week="${i}">${esc(r.label)}</span>`).join(" ") +
     '<span class="status" id="saveStatus">' + (READONLY ? "view only" : "ready") + "</span>";
   $("weekTabs").querySelectorAll("[data-week]").forEach(c => {
     const go = () => { VIEW.weekIndex = +c.dataset.week; render(); };
+    c.onclick = go;
+    c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+  });
+  $("weekTabs").querySelectorAll("[data-mode]").forEach(c => {
+    const go = () => setMode(c.dataset.mode);
     c.onclick = go;
     c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
   });
