@@ -775,9 +775,7 @@ function renderConfig() {
 }
 
 function renderTabs() {
-  const weeks = new Set(STATE.weeks.map(w => weekKey(w.scanDate) || w.id));
-  const canSplit = STATE.weeks.length > weeks.size;
-  const toggle = canSplit || VIEW.mode === "day"
+  const toggle = STATE.weeks.length
     ? `<span class="modes" role="group" aria-label="Compare by">` +
       ["week", "day"].map(m =>
         `<span class="chip mode ${VIEW.mode === m ? "on" : ""}" tabindex="0"
