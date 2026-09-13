@@ -7,6 +7,11 @@ site sees the same weeks. Standard library only - no packages to install.
     python server.py            # http://localhost  (port 80)
     python server.py 9000       # a different port
     python server.py http       # force plain http even with a certificate
+    python server.py 8081 local # only this machine can reach it
+
+Run it with "local" when something else - Caddy, nginx - is the thing the
+outside world talks to. Nothing but that proxy can then reach the site, so
+it does not need a password of its own.
 
 What it keeps, next to this file:
     state.json          everything the page has saved
@@ -698,9 +703,12 @@ def find_cert():
     return None, None
 
 
+HOST = "0.0.0.0"
+
+
 def bind(cls, port, *args, fatal=True):
     try:
-        return cls(("0.0.0.0", port), *args)
+        return cls((HOST, port), *args)
     except OSError:
         if not fatal:
             return None
@@ -746,6 +754,8 @@ def announce(servers, cert):
     def shown(p):
         return "" if p in (80, 443) else f":{p}"
     print(f"Kingdom War Room  ->  {scheme}://localhost{shown(port)}")
+    if HOST != "0.0.0.0":
+        print("  reachable only from this machine")
     print(f"  serving   {INDEX}")
     print(f"  state     {STATE}")
     print(f"  uploads   {UPLOADS}")
@@ -777,6 +787,10 @@ def main() -> None:
 
     args = list(sys.argv[1:])
     force_http = any(a.lower() in ("http", "--http", "-http") for a in args)
+    if any(a.lower() in ("local", "--local", "-local") for a in args):
+        global HOST
+        HOST = "127.0.0.1"
+        force_http = True
     cert, key = (None, None) if force_http else find_cert()
 
     servers = [s for s in start(cert, key, [a for a in args if a.isdigit()]) if s[2]]

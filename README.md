@@ -1,52 +1,46 @@
-# RoK Kingdom Weekly Activity Rankings
+# Kingdom War Room
 
-Ranks every member of the kingdom - all four alliances - from the weekly
-activity export, and keeps building history as you drop in a new spreadsheet
-each week.
+Ranks every member of the kingdom from the activity export, and keeps
+building history as you add a new spreadsheet.
+
+It runs as a website. You open it, drag the `.xlsx` on, and the page reads
+the spreadsheet in the browser, scores everyone and saves the result on the
+server so everyone sees the same thing.
 
 ## Running it
 
-Double-click **`rank.bat`**, or from a terminal:
+Build the page:
 
 ```bash
-python rank.py
+python webapp/build.py
 ```
 
-It reads every week folder, scores the newest one, writes the reports into
-`output\`, and opens the HTML report in your browser.
+That writes `selfhost/index.html`, which is served with `selfhost/server.py`.
+Both are deployed together - see the `myprojects-site` bundle for the
+Caddy configuration that puts it on `rok.myprojects.cc` behind a password.
 
-## Adding next week
+## Adding a week
 
-Make a new folder inside `Alliance Activity` and drop the export in:
+Open the site, **Weekly spreadsheets**, and drop the export on. Anything
+scanned inside the same game week replaces what is already there, so a fresh
+scan each day keeps the week up to date rather than piling up entries. The
+first scan after the Monday 00:00 UTC reset starts the next week and leaves
+the finished one alone.
 
-```
-Alliance Activity\
-    16-22 August\      <- week 1
-        2kingdoms_DeV_A98P_DevA_AK98_alliances.xlsx
-    23-29 August\      <- just add this
-        2kingdoms_DeV_A98P_DevA_AK98_alliances.xlsx
-```
+The **Week / Day** switch beside the week tabs chooses what is compared:
+week to week, or each scan against the one before it.
 
-Then run it again. The folder name is only a label - weeks are ordered by the
-scan date found inside the file, so you can name folders however you like. A
-folder may hold **several** spreadsheets (one per kingdom or per alliance) and
-they are merged automatically.
+## Which exports it reads
 
-From the second week onward you also get: power growth, score change, rank
-movement, per-member history, and a list of who left.
+Two shapes, told apart automatically:
 
-## What comes out
-
-| File | What it is |
-|---|---|
-| `output\<week>_report.html` | The main report - sortable, searchable, filterable. Works offline; send it to your officers. |
-| `output\<week>_rankings.csv` | Same rankings as a spreadsheet. |
-| `output\history.csv` | Every member, every week, one row each - the long-term record. |
-| `output\<week>_artifact.html` | Only with `--artifact`: the same report, ready to publish as a shareable link. |
-
-The report has: summary cards, alliance standings, the full member table
-(click any row for a scorecard and week-by-week history), an **action list** of
-inactive/low-activity members, and who left since last week.
+- **Alliance activity export** - one sheet per alliance, with last-login
+  times, donations, helps, forts and armory points.
+- **Kingdom deep scan** - the top-N sheet with power, kill points, helps
+  given and resources given. Its numbers are lifetime totals, so they are
+  scored on what was added since the previous scan. It has no last-login
+  column, so the inactivity flags and the kick list do not apply, and the
+  scan time is read from the summary sheet instead.
 
 ## How the score works
 
@@ -149,10 +143,9 @@ If a metric is entirely zero across an export it is dropped from the score
 automatically and its weight is redistributed - so an export missing a column,
 or week 1 having no power growth, will not skew anyone.
 
-## The web app (shareable, uploads in the browser)
+## Building and hosting
 
-As well as the local reports there is a browser version your R5s can use.
-It parses the .xlsx itself, so nobody needs Python installed.
+The page parses the .xlsx itself, so nobody needs Python installed to use it.
 
 Build it:
 
@@ -178,92 +171,21 @@ to just its numbers.
 If you host it yourself, `selfhost/README.txt` covers the server side.
 Three things worth knowing before it faces the internet:
 
-- **Put a password in `password.txt`** next to `server.py`. Without one,
-  anyone who can open the page can change the rankings. With one, everybody
-  can still read the page and only the password lets them change anything.
-- **Saves cannot overwrite each other.** If two officers have the page open
-  and both save, the second one is told and reloaded rather than silently
-  wiping the first.
+- **The password lives in Caddy**, not here. The server runs with
+  `server.py 8081 local`, which listens on this machine only, so the proxy in
+  front of it is the only way in and it needs no password of its own.
+- **Saves cannot overwrite each other.** If two people have the page open and
+  both save, the second is told and reloaded rather than wiping the first.
 - **The server keeps its own backups** - the previous save as
   `state.json.bak` and the last ten in `backups\`. They are on the same
   machine, so keep using Download backup for anything you would hate to lose.
 
-Sources live in `webapp/`:
-
-- `app.js` - the Excel reader and scoring engine (mirrors `rok_ranker/`)
-- `page.html` - markup, styling and the app shell
-- `server.py` - the optional self-hosting server
-- `build.py` - stitches them together
-
-**If you change `config.toml`, re-run `python webapp/build.py` and republish**,
-or the page keeps the old weights while the local tool uses the new ones.
-
-## Uploading a new scan without touching the website
-
-`ingest.py` takes the spreadsheet the Discord bot gives you and does the rest:
-works out which week it belongs to, files it under `Alliance Activity` so the
-local tool sees it too, and updates that week on the self-hosted site.
-
-```bash
-python ingest.py
-```
-
-Or double-click **`ingest.bat`**.
-
-The routine is: run the bot's command, drag the file it sends you into
-`inbox\`, and double-click `ingest.bat`. The file disappearing from `inbox\`
-is how you know it went up.
-
-**Why not fully automatic?** The bot sends the sheet by direct message. Reading
-your DMs would mean a script logging in as you, which Discord forbids and bans
-accounts for, and a bot account cannot read your DMs either. If whoever runs
-that bot can post the export to a channel instead - or hand you a download
-link - the rest of this becomes unattended, and nothing here would need to
-change except where the file comes from.
-
-### Running it every day
-
-Dropping a sheet in daily **refreshes the current week in place** rather than
-piling up a new entry each day, so a season stays ~52 weeks and the scoring
-keeps its weekly meaning.
-
-The game's week turns over at **00:00 UTC on Monday**, and that is the line
-`ingest.py` uses. A scan taken before it refreshes the week in progress; the
-first scan after it starts a new week and the old one is left frozen exactly as
-it stood. The timestamps inside the export are already UTC - the column is
-literally called "last login (utc)" - so this does not drift when the clocks
-change. Use `--week-start` if the reset ever moves.
-
-A week already on the site keeps whatever name you gave it. Superseded
-spreadsheets are moved to `ingest-archive\`, never deleted, and nothing leaves
-`inbox\` until the site has actually accepted it - so a failed upload can just
-be run again.
-
-If the site has a password, `ingest.py` needs it too: `password.txt` next to it,
-or the `WARROOM_PASSWORD` variable.
-
-```bash
-python ingest.py --dry-run
-```
-
-says which week it would land in and changes nothing.
-
-## Commands
-
-```bash
-python rank.py                  # score the newest week
-python rank.py run --all-weeks  # rebuild reports for every week
-python rank.py run --artifact   # also write a publish-ready copy for sharing
-python rank.py weeks            # list detected week folders
-python rank.py run --no-open    # do not launch the browser
-```
-
-Options: `-i` input folder, `-o` output folder, `-c` config file.
-
 ## Requirements
 
-Python 3.11+ and `openpyxl`:
+Python 3.11+ and `openpyxl`, for building the page:
 
 ```bash
 pip install -r requirements.txt
 ```
+
+The server itself needs only the standard library.

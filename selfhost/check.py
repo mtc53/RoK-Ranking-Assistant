@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PORTS = [443, 80, 8000]
+PORTS = [8081, 443, 80, 8000]
 
 
 def line(char="-"):

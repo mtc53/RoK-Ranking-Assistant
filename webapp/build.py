@@ -25,7 +25,7 @@ PACK_FIELDS = ["governor_id", "name", "alliance_tag", "rank", "title",
                "resources_donated", "forts_destroyed", "armory_points",
                "last_login", "days_inactive", "days_in_alliance"]
 
-SHIPPED = ("server.py", "README.txt", "start.bat", "open-firewall.bat",
+SHIPPED = ("server.py", "README.txt", "open-firewall.bat",
            "check.py", "check.bat")
 
 RUNTIME = {"state.json", "state.json.bak", "state.json.new", "server.log",
