@@ -109,9 +109,11 @@ def merge(state: dict, entry: dict) -> dict:
 
 
 class Site:
-    def __init__(self, url: str, password: str | None):
+    def __init__(self, url: str, password: str | None, gate: str | None = None):
         self.url = url.rstrip("/")
         self.password = password
+        self.gate = gate
+        self.signed_in = False
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.rev = "0"
@@ -122,16 +124,25 @@ class Site:
                                      headers=headers or {})
         if data is not None:
             req.add_header("Content-Type", "application/json")
+        if self.gate:
+            token = base64.b64encode(self.gate.encode()).decode()
+            req.add_header("Authorization", "Basic " + token)
         try:
             with self.opener.open(req, timeout=timeout) as resp:
                 raw = resp.read()
                 return resp.status, (json.loads(raw) if raw else {}), dict(resp.headers)
         except urllib.error.HTTPError as exc:
             raw = exc.read()
+            head = dict(exc.headers)
+            if exc.code == 401 and "basic" in str(
+                    head.get("WWW-Authenticate", "")).lower():
+                die("the site's password gate turned this away. Put the gate "
+                    "login in gate.txt next to this script, as one line:\n"
+                    "             user:thepassword")
             try:
-                return exc.code, json.loads(raw), dict(exc.headers)
+                return exc.code, json.loads(raw), head
             except ValueError:
-                return exc.code, {}, dict(exc.headers)
+                return exc.code, {}, head
         except urllib.error.URLError as exc:
             die(f"could not reach {self.url} - {exc.reason}. Is the War Room running?")
 
@@ -144,6 +155,7 @@ class Site:
                 "WARROOM_PASSWORD variable.")
         if code != 200:
             die(f"logging in failed: {out.get('error') or code}")
+        self.signed_in = True
 
     def read(self) -> dict:
         code, state, head = self._call("/api/state")
@@ -153,6 +165,11 @@ class Site:
             die(f"could not read the site's data: {code}")
         self.rev = head.get("X-WarRoom-Rev", "0")
         if head.get("X-WarRoom-Auth") == "required":
+            if self.signed_in:
+                die("the password was accepted but the login did not stick. "
+                    "This happens when the site is reached over http while it "
+                    "serves https: the login cookie is then refused. Use the "
+                    "https address in server.txt.")
             die("not logged in - set WARROOM_PASSWORD or add password.txt "
                 "next to this script.")
         return state if isinstance(state, dict) else {}
@@ -210,6 +227,14 @@ def find_password(explicit: Path | None) -> str | None:
     return None
 
 
+def find_gate() -> str | None:
+    """user:password for the gate in front of the site, if there is one."""
+    env = os.environ.get("WARROOM_GATE")
+    if env and env.strip():
+        return env.strip()
+    return first_line(ROOT / "gate.txt")
+
+
 def find_server(explicit: str | None) -> str:
     address = (explicit or os.environ.get("WARROOM_URL")
                or first_line(ROOT / "server.txt") or "").strip()
@@ -262,7 +287,8 @@ def main() -> None:
         f"{len(week['members'])} members")
     log(f"  that is the week of {label} (ends {ends:%a %d %b %H:%M} UTC)")
 
-    site = Site(find_server(args.url), find_password(args.password_file))
+    site = Site(find_server(args.url), find_password(args.password_file),
+                find_gate())
     site.sign_in()
     state = site.read()
 

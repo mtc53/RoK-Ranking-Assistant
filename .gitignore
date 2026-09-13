@@ -1,5 +1,6 @@
 # Things that are this machine's business, not the repository's.
 password.txt
+gate.txt
 server.txt
 .secret
 inbox/
