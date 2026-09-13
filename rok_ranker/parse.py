@@ -18,6 +18,7 @@ import openpyxl
 HEADER_ALIASES = {
     "governor_id": ["governor id", "governorid", "id", "player id", "lord id"],
     "name": ["name", "governor name", "nickname", "player"],
+    "alliance_tag": ["alliance tag"],
     "rank": ["rank", "alliance rank"],
     "title": ["title"],
     "home_kingdom": ["home kingdom", "kingdom", "home"],
@@ -28,7 +29,8 @@ HEADER_ALIASES = {
     "tech_donations": ["tech donations", "technology donations", "tech donation"],
     "building_time_s": ["building time (s)", "building time", "build time (s)"],
     "times_helped": ["times helped", "helps", "helps given"],
-    "resources_donated": ["resources donated", "resource donated", "resources"],
+    "resources_donated": ["resources donated", "resource donated", "resources",
+                          "resources given"],
     "forts_destroyed": ["forts destroyed", "forts", "flags destroyed"],
     "armory_points": ["armory points", "armory", "armoury points"],
     "last_seen": ["last seen"],
@@ -104,6 +106,29 @@ def _find_header(rows, required, lookup):
     return None, None
 
 
+def _duplicate_key_columns(header_row) -> bool:
+    """A row repeating Governor ID is a side table, such as a Top 10s sheet,
+    not a list of members."""
+    seen = sum(1 for cell in header_row
+               if _norm(cell) in ("governor id", "governorid"))
+    return seen > 1
+
+
+def _scan_stamp(rows):
+    """The scan time a kingdom export prints on its summary sheet."""
+    pattern = re.compile(
+        r"(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*UTC")
+    for row in rows[:12]:
+        for cell in row:
+            if isinstance(cell, str):
+                hit = pattern.search(cell)
+                if hit:
+                    y, mo, d, h, mi, s = hit.groups()
+                    return datetime(int(y), int(mo), int(d),
+                                    int(h), int(mi), int(s or 0))
+    return None
+
+
 def parse_workbook(path: Path):
     """Return (members, alliance_summaries) for one .xlsx export."""
     try:
@@ -117,12 +142,15 @@ def parse_workbook(path: Path):
         ) from exc
     members: list[dict] = []
     summaries: list[dict] = []
+    stamp = None
 
     try:
         for ws in wb.worksheets:
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
+
+            stamp = stamp or _scan_stamp(rows)
 
             hdr, mmap = _find_header(rows, {"governor_id", "power"}, LOOKUP)
             if hdr is None:
@@ -148,12 +176,15 @@ def parse_workbook(path: Path):
             if hdr is None:
                 continue
 
+            if _duplicate_key_columns(rows[hdr]):
+                continue
+
             tag = str(ws.title).strip()
             for row in rows[hdr + 1:]:
                 rec = {f: (row[i] if i < len(row) else None) for i, f in mmap.items()}
                 if rec.get("governor_id") in (None, ""):
                     continue
-                member = {"alliance_tag": tag, "source_file": path.name}
+                member = {"source_file": path.name}
                 for field in HEADER_ALIASES:
                     value = rec.get(field)
                     if field in NUMERIC_FIELDS:
@@ -162,11 +193,17 @@ def parse_workbook(path: Path):
                         member[field] = value if isinstance(value, datetime) else None
                     else:
                         member[field] = None if value is None else str(value).strip()
+                column_tag = rec.get("alliance_tag")
+                member["alliance_tag"] = (str(column_tag).strip()
+                                          if column_tag not in (None, "") else tag)
                 member["governor_id"] = int(member["governor_id"])
                 member["name"] = member.get("name") or f"Governor {member['governor_id']}"
                 members.append(member)
     finally:
         wb.close()
+
+    for member in members:
+        member["scan_stamp"] = stamp
 
     return members, summaries
 
@@ -209,8 +246,11 @@ def parse_week(folder: Path) -> dict:
     members = list(best.values())
 
     logins = [m["last_login"] for m in members if m.get("last_login")]
+    stamps = [m["scan_stamp"] for m in members if m.get("scan_stamp")]
     if logins:
         scan_date = max(logins)
+    elif stamps:
+        scan_date = max(stamps)
     else:
         scan_date = datetime.fromtimestamp(max(p.stat().st_mtime for p in files))
 

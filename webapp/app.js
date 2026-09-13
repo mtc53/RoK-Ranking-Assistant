@@ -131,6 +131,7 @@ function sheetRows(sheetXml, shared) {
 
 const HEADER_ALIASES = {
   governor_id: ["governor id", "governorid", "id", "player id", "lord id"],
+  alliance_tag: ["alliance tag"],
   name: ["name", "governor name", "nickname", "player"],
   rank: ["rank", "alliance rank"],
   title: ["title"],
@@ -142,7 +143,8 @@ const HEADER_ALIASES = {
   tech_donations: ["tech donations", "technology donations", "tech donation"],
   building_time_s: ["building time (s)", "building time", "build time (s)"],
   times_helped: ["times helped", "helps", "helps given"],
-  resources_donated: ["resources donated", "resource donated", "resources"],
+  resources_donated: ["resources donated", "resource donated", "resources",
+    "resources given"],
   forts_destroyed: ["forts destroyed", "forts", "flags destroyed"],
   armory_points: ["armory points", "armory", "armoury points"],
   last_login: ["last login (utc)", "last login"],
@@ -183,6 +185,28 @@ function num(v) {
   return isNaN(f) ? 0 : f * mult;
 }
 
+function duplicateKeyColumns(row) {
+  let seen = 0;
+  for (const cell of row) {
+    const n = norm(cell);
+    if (n === "governor id" || n === "governorid") seen++;
+  }
+  return seen > 1;
+}
+
+function scanStamp(rows) {
+  const pattern = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*UTC/;
+  for (const row of rows.slice(0, 12)) {
+    for (const cell of row) {
+      if (typeof cell !== "string") continue;
+      const hit = pattern.exec(cell);
+      if (hit) return new Date(Date.UTC(+hit[1], +hit[2] - 1, +hit[3],
+                                        +hit[4], +hit[5], +(hit[6] || 0)));
+    }
+  }
+  return null;
+}
+
 function findHeader(rows, required, lookup) {
   for (let r = 0; r < Math.min(10, rows.length); r++) {
     const map = {};
@@ -200,9 +224,11 @@ export async function parseMembers(buffer) {
   const sheets = await parseWorkbook(buffer);
   const members = [];
   const summaries = [];
+  let stamp = null;
 
   for (const sheet of sheets) {
     if (!sheet.rows.length) continue;
+    stamp = stamp || scanStamp(sheet.rows);
 
     let hit = findHeader(sheet.rows, ["governor_id", "power"], LOOKUP);
     if (!hit) {
@@ -222,17 +248,21 @@ export async function parseMembers(buffer) {
       }
       continue;
     }
+    if (duplicateKeyColumns(sheet.rows[hit.row])) continue;
+
     for (const row of sheet.rows.slice(hit.row + 1)) {
       const rec = {};
       for (const [i, f] of Object.entries(hit.map)) rec[f] = row[i];
       if (rec.governor_id == null || rec.governor_id === "") continue;
-      const m = { alliance_tag: String(sheet.name).trim() };
+      const m = {};
       for (const field of Object.keys(HEADER_ALIASES)) {
         const v = rec[field];
         if (NUMERIC.has(field)) m[field] = num(v);
         else if (field === "last_login") m[field] = typeof v === "number" ? v : null;
         else m[field] = v == null ? null : String(v).trim();
       }
+      m.alliance_tag = rec.alliance_tag == null || rec.alliance_tag === ""
+        ? String(sheet.name).trim() : String(rec.alliance_tag).trim();
       m.governor_id = Math.round(m.governor_id);
       m.name = m.name || ("Governor " + m.governor_id);
       members.push(m);
@@ -254,7 +284,8 @@ export async function parseMembers(buffer) {
   return {
     members: list,
     summaries,
-    scanDate: scanSerial ? serialToDate(scanSerial).toISOString() : null,
+    scanDate: scanSerial ? serialToDate(scanSerial).toISOString()
+      : stamp ? stamp.toISOString() : null,
   };
 }
 

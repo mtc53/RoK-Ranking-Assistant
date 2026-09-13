@@ -40,15 +40,17 @@ pool = "global"
 # Set from how the game actually reports these, not guessed from the data.
 # Kill score is a lifetime running total, so only the WEEKLY INCREASE counts:
 # a member who added 20M beats one sitting on 100M who added 10M.
+# The kingdom deep scan reports lifetime totals, so every scored metric
+# counts only what was added since the previous scan.
 kill_score        = "delta"
-# These reset every week, so the exported number already IS this week's
-# contribution and is scored exactly as it stands.
+times_helped      = "delta"
+resources_donated = "delta"
+# Only reached if an alliance activity export is loaded, where these are
+# already the period's own contribution.
 tech_donations    = "raw"
-times_helped      = "raw"
 building_time_s   = "raw"
 forts_destroyed   = "raw"
 armory_points     = "raw"
-resources_donated = "raw"
 
 # -------------------------------------------------------------
 # Weights: what each activity is worth. They do NOT need to add
@@ -56,14 +58,16 @@ resources_donated = "raw"
 # to 0 to drop that metric from the score completely.
 # -------------------------------------------------------------
 [weights]
-kill_score        = 21   # kill points gained this week (shown as "Kills +")
-tech_donations    = 19   # alliance technology donated
-times_helped      = 16   # alliance helps given
-armory_points     = 14   # armory contribution
-forts_destroyed   = 13   # forts / flags destroyed
-power_growth      = 10   # account growth vs last week (needs 2+ weeks)
-building_time_s   = 7    # building time contributed via helps
-resources_donated = 0    # off - not counted toward the score
+kill_score        = 35   # kill points gained in the period
+times_helped      = 25   # helps given in the period
+resources_donated = 20   # resources given in the period
+power_growth      = 20   # account growth vs the previous scan
+# Not present in the kingdom deep scan. Left at 0 so their absence cannot
+# quietly redistribute weight onto everything else.
+tech_donations    = 0
+armory_points     = 0
+forts_destroyed   = 0
+building_time_s   = 0
 
 # Which scorecard category each metric rolls up into, for the report.
 [categories]
