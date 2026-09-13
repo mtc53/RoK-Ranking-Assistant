@@ -34,7 +34,13 @@ RUNTIME = {"state.json", "state.json.bak", "state.json.new", "server.log",
 
 
 def seed_weeks() -> list:
-    """Bake whatever weeks exist locally into the page as starting data."""
+    """Bake whatever weeks exist locally into the page as starting data.
+
+    Pass --no-seed to ship an empty page instead, which is what you want when
+    the site is starting over on a different export.
+    """
+    if "--no-seed" in sys.argv:
+        return []
     sys.path.insert(0, str(ROOT))
     from rok_ranker.parse import load_all_weeks
 
