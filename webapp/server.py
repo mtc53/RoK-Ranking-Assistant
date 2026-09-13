@@ -62,6 +62,7 @@ WRITES_PER_MINUTE = 30
 LOGIN_TRIES = 10
 LOGIN_LOCKOUT = 15 * 60
 COOKIE = "warroom"
+LOCAL = {"127.0.0.1", "::1"}
 
 LOCK = threading.RLock()
 
@@ -350,8 +351,31 @@ class Handler(BaseHTTPRequestHandler):
         self._read_body = False
         super().handle_one_request()
 
-    def _who(self) -> str:
+    def _peer(self) -> str:
         return self.client_address[0] if self.client_address else "?"
+
+    def _who(self) -> str:
+        """The visitor, as seen through a reverse proxy on this machine.
+
+        Behind a proxy every request arrives from loopback, so the connection
+        cap, the save rate limit and the login lockout would otherwise apply
+        to everyone at once. The forwarded address is only believed when the
+        connection really did come from this machine.
+        """
+        peer = self._peer()
+        if peer in LOCAL:
+            sent = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+            if sent:
+                return sent
+        return peer
+
+    def _secure(self) -> bool:
+        if isinstance(self.server, TLSServer):
+            return True
+        if self._peer() in LOCAL:
+            proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
+            return proto == "https"
+        return False
 
     def _drain(self) -> None:
         """Read an upload we are about to refuse.
@@ -477,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
     def _cookie(self, value: str, age: int) -> str:
         bits = [f"{COOKIE}={value}", "Path=/", f"Max-Age={age}",
                 "HttpOnly", "SameSite=Strict"]
-        if isinstance(self.server, TLSServer):
+        if self._secure():
             bits.append("Secure")
         return "; ".join(bits)
 
