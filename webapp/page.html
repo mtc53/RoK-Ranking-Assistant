@@ -516,6 +516,7 @@ async function save() {
   try {
     await Store.write(payload);
     setStatus(Store.mode === "local" ? "saved (this browser)" : "saved", "ok");
+    if (Store.mode === "server") publishToSite();
   } catch (err) {
     const code = err && err.code;
     if (["not_writer", "not_granted", "not_declared", "capability_disabled",
@@ -541,6 +542,49 @@ async function save() {
       notice("Could not save: " + (err && err.message ? err.message : code || "unknown error"), true);
     }
   }
+}
+
+// Publish a read-only snapshot of the current standings to myprojects.cc.
+// The browser does the scoring (same engine the page uses), hands the finished
+// summary to the local server, and the server relays it to the site. Runs after
+// each server save; failures are silent so they never interrupt saving.
+function publishToSite() {
+  try {
+    if (!SCORED.length) return;
+    const week = SCORED[SCORED.length - 1];
+    const members = (week.members || []).slice()
+      .sort((a, b) => (a.rank_overall || 1e9) - (b.rank_overall || 1e9));
+    const alliances = new Set(members.map(m => m.alliance_tag).filter(Boolean));
+    const top = members.slice(0, 10).map(m => [
+      "#" + (m.rank_overall ?? "—"),
+      m.name || ("Governor " + m.governor_id),
+      m.alliance_tag || "",
+      (m.score ?? 0).toLocaleString(),
+    ]);
+    const data = {
+      project: "warroom",
+      title: "Kingdom War Room",
+      updated: new Date().toISOString(),
+      status: "ok",
+      summary: `${week.label} scored — ${members.length} governors across ` +
+               `${alliances.size} alliance${alliances.size === 1 ? "" : "s"}.`,
+      stats: [
+        { label: "Governors", value: String(members.length) },
+        { label: "Alliances", value: String(alliances.size) },
+        { label: "Week", value: String(week.label) },
+      ],
+      sections: top.length
+        ? [{ heading: "Top governors",
+             columns: ["Rank", "Governor", "Alliance", "Score"], rows: top }]
+        : [],
+      source: "https://github.com/mtc53/rok-ranking-assistant",
+    };
+    fetch("api/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).catch(() => {});
+  } catch (e) { /* publishing never blocks the app */ }
 }
 
 function goReadOnly(message, hide) {

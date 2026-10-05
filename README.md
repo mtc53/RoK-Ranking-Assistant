@@ -189,3 +189,42 @@ pip install -r requirements.txt
 ```
 
 The server itself needs only the standard library.
+
+## Publishing to myprojects.cc
+
+The War Room now feeds the public hub automatically — no copying files, no
+password on the public side. The page scores the week in the browser (the same
+engine it always uses) and, after each save, sends a read-only snapshot to the
+local server at `POST /api/publish`. The server keeps a copy under `publish/`
+and, when a token is set, fires a GitHub `repository_dispatch` at the site so it
+redeploys within a minute.
+
+Set two environment variables where the server runs to turn on the relay:
+
+```
+MYPROJECTS_TOKEN=<a fine-grained token with "contents: write" on myprojects-site>
+MYPROJECTS_REPO=mtc53/myprojects-site   # the default, override only if forked
+```
+
+With no token the server still saves `publish/warroom.json` locally, which a
+static host can serve directly as the site's `data/warroom.json`.
+
+### Publishing without the browser
+
+`webapp/publish.mjs` does the same thing headlessly — useful for a scheduled
+task or CI. It scores `state.json` with the real engine and prints or dispatches
+the snapshot:
+
+```
+node webapp/publish.mjs path/to/state.json            # print it
+MYPROJECTS_TOKEN=xxx node webapp/publish.mjs state.json --dispatch
+```
+
+The data shape is the site's contract — see `DATA_CONTRACT.md` in myprojects-site.
+
+## Passwords
+
+There is no public password anymore. The War Room is a local data-entry tool; the
+public site is a read-only snapshot. The optional editing password (`password.txt`)
+still works if you want to limit who can change the rankings on a shared server,
+but it is off by default and never gates reading or the public hub.

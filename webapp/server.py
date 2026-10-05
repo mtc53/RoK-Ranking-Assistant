@@ -41,6 +41,8 @@ import ssl
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from functools import lru_cache
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,6 +70,15 @@ LOGIN_TRIES = 10
 LOGIN_LOCKOUT = 15 * 60
 COOKIE = "warroom"
 LOCAL = {"127.0.0.1", "::1"}
+
+# Publishing a read-only snapshot to the site. The page POSTs the finished
+# summary to /api/publish; we stash a copy and, if a token is set, fire a
+# repository_dispatch so myprojects-site redeploys. Nothing here is required -
+# with no token the War Room still works, it just does not push to the site.
+PUBLISH_DIR = HERE / "publish"
+SITE_REPO = os.environ.get("MYPROJECTS_REPO", "mtc53/myprojects-site")
+SITE_TOKEN = os.environ.get("MYPROJECTS_TOKEN", "").strip()
+MAX_PUBLISH = 512 * 1024
 
 LOCK = threading.RLock()
 
@@ -122,6 +133,34 @@ def valid_state(payload) -> bool:
     if not isinstance(payload, dict) or not isinstance(payload.get("weeks"), list):
         return False
     return all(isinstance(w, dict) for w in payload["weeks"])
+
+
+def relay_to_site(data: dict) -> tuple[bool, str]:
+    """Fire a repository_dispatch so the site writes data/warroom.json and
+    redeploys. Returns (relayed, human detail). No token means no relay, which
+    is fine - the snapshot is still saved locally under publish/."""
+    if not SITE_TOKEN:
+        return False, "no token set (snapshot saved locally only)"
+    url = f"https://api.github.com/repos/{SITE_REPO}/dispatches"
+    payload = json.dumps({
+        "event_type": "publish-data",
+        "client_payload": {"project": "warroom", "data": data},
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Authorization": f"Bearer {SITE_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "warroom-publisher",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as res:
+            if res.status in (200, 204):
+                return True, f"dispatched to {SITE_REPO}"
+            return False, f"{SITE_REPO} returned {res.status}"
+    except urllib.error.HTTPError as err:
+        return False, f"{SITE_REPO} returned {err.code}"
+    except (urllib.error.URLError, OSError) as err:
+        return False, f"could not reach GitHub: {err}"
 
 
 def safe_name(text: str) -> str:
@@ -499,9 +538,43 @@ class Handler(BaseHTTPRequestHandler):
                                ("X-WarRoom-Auth", self._auth_state())])
 
     def do_POST(self):
-        if (self.path.split("?")[0].rstrip("/") or "/") != "/api/login":
-            return self._fail(404, "no such page")
-        self._login()
+        path = self.path.split("?")[0].rstrip("/") or "/"
+        if path == "/api/login":
+            return self._login()
+        if path == "/api/publish":
+            return self._publish()
+        self._fail(404, "no such page")
+
+    def _publish(self):
+        """Take the page's standings snapshot and push it to the site.
+
+        Writing stays behind the same door as saving: whoever may change the
+        rankings may publish them. We always keep a local copy under publish/,
+        and additionally relay to the site when a token is configured.
+        """
+        if not self._logged_in():
+            return self._fail(401, "log in before publishing")
+        body = self._body()
+        if body is None:
+            return
+        if len(body) > MAX_PUBLISH:
+            return self._fail(413, "snapshot too large to publish")
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return self._fail(400, "not valid JSON")
+        if not isinstance(data, dict) or data.get("project") != "warroom":
+            return self._fail(400, "that is not a War Room snapshot")
+
+        try:
+            PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
+            (PUBLISH_DIR / "warroom.json").write_text(
+                json.dumps(data, indent=2), encoding="utf-8")
+        except OSError as err:
+            return self._fail(500, f"could not write snapshot: {err}")
+
+        relayed, detail = relay_to_site(data)
+        self._json(200, {"ok": True, "relayed": relayed, "detail": detail})
 
     def _cookie(self, value: str, age: int) -> str:
         bits = [f"{COOKIE}={value}", "Path=/", f"Max-Age={age}",

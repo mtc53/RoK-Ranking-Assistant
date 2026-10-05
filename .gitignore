@@ -28,3 +28,6 @@ __pycache__/
 Alliance Activity/
 output/
 selfhost/index.html
+
+# local publish snapshots
+publish/
